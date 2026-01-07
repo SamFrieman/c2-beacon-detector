@@ -182,8 +182,7 @@ const C2BeaconDetector = () => {
       "dest_ip": "192.168.1.100",   // Destination IP
       "src_port": 49152,            // Source port
       "dest_port": 443              // Destination port
-    },
-    // ... more connections
+    }
   ]
 }
 
@@ -376,4 +375,87 @@ Flexible field names supported:
                         {analysisResult.featureExplanations && analysisResult.featureExplanations.length > 0 && (
                             <section className="bg-slate-900/50 backdrop-blur rounded-xl border border-slate-800 p-8 feature-card">
                                 <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-                                    <i className="fas fa-lightbulb text-cyan-
+                                    <i className="fas fa-lightbulb text-cyan-400"></i>
+                                    Feature Explanations
+                                </h3>
+                                <div className="space-y-3">
+                                    {analysisResult.featureExplanations.map((explanation, idx) => (
+                                        <div key={idx} className="bg-slate-800/50 rounded-lg p-4 text-sm text-slate-300">
+                                            • {explanation}
+                                        </div>
+                                    ))}
+                                </div>
+                            </section>
+                        )}
+
+                    </div>
+                )}
+
+                {/* Info Panel (shown when no analysis) */}
+                {!analysisResult && !isAnalyzing && !error && (
+                    <section className="bg-slate-900/30 backdrop-blur rounded-xl border border-slate-800 p-8 fade-in">
+                        <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                            <i className="fas fa-info-circle text-cyan-400"></i>
+                            How This Works
+                        </h3>
+                        <div className="grid md:grid-cols-3 gap-6 text-slate-300">
+                            <div>
+                                <h4 className="font-semibold mb-3 text-cyan-400 flex items-center gap-2">
+                                    <i className="fas fa-brain"></i>
+                                    Behavioral Analysis
+                                </h4>
+                                <ul className="space-y-2 text-sm">
+                                    <li>• Timing pattern analysis</li>
+                                    <li>• Periodicity detection</li>
+                                    <li>• Jitter calculation</li>
+                                    <li>• Payload consistency</li>
+                                </ul>
+                            </div>
+                            <div>
+                                <h4 className="font-semibold mb-3 text-cyan-400 flex items-center gap-2">
+                                    <i className="fas fa-microscope"></i>
+                                    Detection Methods
+                                </h4>
+                                <ul className="space-y-2 text-sm">
+                                    <li>• Statistical anomaly detection</li>
+                                    <li>• Known C2 signatures</li>
+                                    <li>• Framework identification</li>
+                                    <li>• MITRE ATT&CK mapping</li>
+                                </ul>
+                            </div>
+                            <div>
+                                <h4 className="font-semibold mb-3 text-cyan-400 flex items-center gap-2">
+                                    <i className="fas fa-shield-alt"></i>
+                                    Key Features
+                                </h4>
+                                <ul className="space-y-2 text-sm">
+                                    <li>• Client-side processing</li>
+                                    <li>• No data uploaded</li>
+                                    <li>• Exportable reports</li>
+                                    <li>• Professional-grade analysis</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </section>
+                )}
+
+            </main>
+
+            {/* Footer */}
+            <footer className="border-t border-slate-800 bg-slate-900/30 mt-12 py-6 no-print">
+                <div className="max-w-7xl mx-auto px-6 text-center text-slate-500 text-sm">
+                    <p>Built for authorized security analysis only. Use responsibly.</p>
+                    <p className="mt-2">
+                        <a href="https://github.com/YOUR_USERNAME/c2-beacon-detector" className="text-cyan-400 hover:underline">
+                            Open Source on GitHub
+                        </a>
+                    </p>
+                </div>
+            </footer>
+
+        </div>
+    );
+};
+
+// Render the application
+ReactDOM.render(<C2BeaconDetector />, document.getElementById('root'));
