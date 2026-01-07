@@ -1,4 +1,3 @@
-
 /**
  * C2 Beacon Detection Engine
  * Implements the behavioral detection algorithm
@@ -132,4 +131,112 @@ const Detector = {
         if (features.cv_interval > 0.70) {
             suspicionScore -= 20;
             reasons.push(`✓ High timing variability (${(features.cv_interval * 100).toFixed(1)}%) suggests organic/human behavior`);
-        } else if (features.cv_interval > 0.50)
+        } else if (features.cv_interval > 0.50) {
+            suspicionScore -= 10;
+            reasons.push(`✓ Moderate variability suggests less automated behavior`);
+        }
+
+        // Multiple destinations less typical of C2
+        if (features.unique_dest_ips > 10) {
+            suspicionScore -= 15;
+            reasons.push(`✓ Multiple unique destinations (${features.unique_dest_ips}) less typical of C2`);
+        } else if (features.unique_dest_ips > 5) {
+            suspicionScore -= 8;
+            reasons.push(`✓ Several unique destinations (${features.unique_dest_ips})`);
+        }
+
+        // Variable payload sizes suggest legitimate traffic
+        if (features.bytes_consistency < 0.50) {
+            suspicionScore -= 10;
+            reasons.push(`✓ Variable payload sizes suggest diverse/legitimate traffic`);
+        }
+
+        // === FINAL CLASSIFICATION ===
+
+        const finalScore = Math.max(0, Math.min(100, suspicionScore));
+        
+        let classification, recommendation, severity;
+        
+        if (finalScore >= 80) {
+            classification = 'CRITICAL';
+            severity = 'critical';
+            recommendation = '🚨 IMMEDIATE ACTION REQUIRED: High confidence C2 beaconing detected. Isolate host immediately, capture memory dump, analyze process tree, collect full PCAP, escalate to incident response team.';
+        } else if (finalScore >= 65) {
+            classification = 'SUSPICIOUS';
+            severity = 'high';
+            recommendation = '⚠️ INVESTIGATE IMMEDIATELY: Strong indicators of C2 activity. Correlate with SIEM/EDR logs, check process network connections, analyze parent processes, monitor for data exfiltration.';
+        } else if (finalScore >= 45) {
+            classification = 'MONITOR';
+            severity = 'medium';
+            recommendation = '👁️ ENHANCED MONITORING: Moderate indicators present. Continue observation, correlate with threat intelligence, check user activity, review authentication logs, set alerts for pattern changes.';
+        } else if (finalScore >= 25) {
+            classification = 'LOW PRIORITY';
+            severity = 'low';
+            recommendation = '📋 LOW PRIORITY: Some anomalies detected but likely benign. Standard monitoring sufficient. Document for baseline comparison.';
+        } else {
+            classification = 'BENIGN';
+            severity = 'info';
+            recommendation = '✓ APPEARS BENIGN: Traffic patterns consistent with legitimate applications. No immediate action required. Continue normal monitoring.';
+        }
+
+        // Identify potential frameworks
+        const frameworks = Analyzer.identifyFramework(features);
+        if (frameworks.length > 0 && frameworks[0].name !== 'Unknown/Custom') {
+            technicalDetails.push(`Possible C2 Frameworks: ${frameworks.map(f => `${f.name} (${f.confidence} confidence)`).join(', ')}`);
+        }
+
+        return {
+            score: finalScore,
+            classification: classification,
+            severity: severity,
+            recommendation: recommendation,
+            reasons: reasons,
+            technicalDetails: technicalDetails,
+            features: features,
+            identifiedFrameworks: frameworks,
+            timestamp: new Date().toISOString()
+        };
+    },
+
+    /**
+     * Generate MITRE ATT&CK technique mappings
+     * @param {Object} detectionResult - Result from detect()
+     * @returns {Array} Array of MITRE techniques
+     */
+    getMITRETechniques: function(detectionResult) {
+        const techniques = [];
+
+        if (detectionResult.score > 50) {
+            techniques.push({
+                id: 'T1071.001',
+                name: 'Application Layer Protocol: Web Protocols',
+                tactic: 'Command and Control'
+            });
+
+            techniques.push({
+                id: 'T1095',
+                name: 'Non-Application Layer Protocol',
+                tactic: 'Command and Control'
+            });
+
+            techniques.push({
+                id: 'T1571',
+                name: 'Non-Standard Port',
+                tactic: 'Command and Control'
+            });
+
+            if (detectionResult.features.duration_minutes > 60) {
+                techniques.push({
+                    id: 'T1102',
+                    name: 'Web Service',
+                    tactic: 'Command and Control'
+                });
+            }
+        }
+
+        return techniques;
+    }
+};
+
+// Make Detector available globally
+window.Detector = Detector;
