@@ -1,4 +1,4 @@
-# 🛡️ C2 Beacon Detector
+# C2 Beacon Detector
 
 **Professional-grade Command & Control beacon detection tool with integrated threat intelligence**
 
@@ -10,9 +10,9 @@ A powerful, client-side network traffic analysis tool that combines behavioral p
 
 ---
 
-## ✨ Features
+## Features
 
-### 🔍 Behavioral Analysis
+### Behavioral Analysis
 - **Timing Pattern Detection** - Identifies regular beaconing intervals
 - **Jitter Analysis** - Calculates timing variance and consistency
 - **Periodicity Scoring** - Measures connection regularity
@@ -21,7 +21,7 @@ A powerful, client-side network traffic analysis tool that combines behavioral p
 - **Port Diversity Analysis** - Identifies single-port communications
 - **Time-of-Day Patterns** - Detects unusual activity hours
 
-### 🌐 Threat Intelligence Integration
+### Threat Intelligence Integration
 - **ThreatFox API** - Real-time IOC lookups from Abuse.ch
 - **Malicious IP Detection** - Cross-references known C2 infrastructure
 - **Malware Family Identification** - Maps IOCs to known threats
@@ -29,7 +29,7 @@ A powerful, client-side network traffic analysis tool that combines behavioral p
 - **Automatic IP Reputation** - Checks all external destinations
 - **Cache Optimization** - Reduces API calls with smart caching
 
-### 🎯 Framework Identification
+### Framework Identification
 Detects signatures from popular C2 frameworks:
 - **Cobalt Strike** - 60s beacon intervals with low jitter
 - **Metasploit/Meterpreter** - 120s beacon patterns
@@ -37,13 +37,13 @@ Detects signatures from popular C2 frameworks:
 - **Sliver** - Consistent payload patterns
 - **Custom C2s** - Generic pattern detection
 
-### 📊 MITRE ATT&CK Mapping
+### MITRE ATT&CK Mapping
 - **T1071** - Application Layer Protocol
 - **T1573** - Encrypted Channel
 - **T1001** - Data Obfuscation
 - Automatic technique mapping based on detected behaviors
 
-### 🔒 Privacy & Security
+### Privacy & Security
 - **100% Client-Side** - No data leaves your browser
 - **No Data Upload** - All processing done locally
 - **Private IP Filtering** - Skips RFC1918 addresses
@@ -52,7 +52,7 @@ Detects signatures from popular C2 frameworks:
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Online Demo
 Visit the [live demo](https://your-github-pages-url.github.io/c2-beacon-detector/) to try it immediately.
@@ -82,7 +82,7 @@ Click any of the sample buttons to see the tool in action:
 
 ---
 
-## 📁 Input Format
+## Input Format
 
 ### Expected JSON Structure
 
@@ -119,7 +119,7 @@ Click any of the sample buttons to see the tool in action:
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 The project uses a modular design for maintainability and extensibility:
 
@@ -178,7 +178,7 @@ c2-beacon-detector/
 
 ---
 
-## 🎓 How It Works
+## How It Works
 
 ### Analysis Pipeline
 
@@ -261,7 +261,7 @@ The tool uses a multi-factor scoring system (0-100):
 
 ---
 
-## 📊 Example Output
+## Example Output
 
 ### Console Output
 ```
@@ -301,7 +301,7 @@ Analysis complete: CRITICAL (Score: 87)
 
 ---
 
-## 🛠️ Use Cases
+## Use Cases
 
 ### Incident Response
 - Quickly triage suspected C2 traffic
@@ -354,7 +354,7 @@ if (features.periodicity > 0.60) score += 15;  // MODERATE
 
 ---
 
-## 🧪 Development
+## Development
 
 ### Prerequisites
 - Modern web browser (Chrome, Firefox, Safari, Edge)
@@ -401,7 +401,7 @@ open http://localhost:8080
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please follow these guidelines:
 
@@ -420,7 +420,7 @@ Contributions are welcome! Please follow these guidelines:
 
 ---
 
-## 📜 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
@@ -436,7 +436,7 @@ in the Software without restriction...
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - **Abuse.ch** - ThreatFox API and IOC data
 - **MITRE Corporation** - ATT&CK Framework
@@ -445,7 +445,7 @@ in the Software without restriction...
 
 ---
 
-## ⚠️ Disclaimer
+## Disclaimer
 
 **FOR AUTHORIZED SECURITY ANALYSIS ONLY**
 
@@ -455,7 +455,7 @@ The authors assume no liability for misuse of this tool.
 
 ---
 
-## 📞 Support & Contact
+## Support & Contact
 
 - **Issues**: [GitHub Issues](https://github.com/samfrieman/c2-beacon-detector/issues)
 - **Email**: security@example.com
@@ -463,7 +463,7 @@ The authors assume no liability for misuse of this tool.
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 
 ### v2.1 (Planned)
 - [ ] Multiple threat intel source integration
@@ -481,7 +481,7 @@ The authors assume no liability for misuse of this tool.
 
 ---
 
-## 📚 Further Reading
+## Further Reading
 
 - [Command and Control Matrix](https://attack.mitre.org/tactics/TA0011/)
 - [ThreatFox Documentation](https://threatfox.abuse.ch/)
@@ -492,8 +492,8 @@ The authors assume no liability for misuse of this tool.
 
 <div align="center">
 
-**Built with ❤️ for the security community**
+**Built with for the security community**
 
-⭐ Star this repo if you find it useful!
+Star this repo if you find it useful!
 
 </div>
