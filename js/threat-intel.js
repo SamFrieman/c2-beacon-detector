@@ -23,25 +23,27 @@ const ThreatIntel = {
     // Custom detection rules storage
     customRules: [],
 
-    async initialize() {
+   async initialize() {
         try {
-            const promises = [];
+            // Add timeout wrapper
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Initialization timeout')), 5000)
+            );
             
-            if (this.config.enabledSources.threatfox) {
-                promises.push(this.updateThreatFox());
-            }
+            const initPromise = this.updateThreatFox();
             
-            if (this.config.enabledSources.customRules) {
-                this.loadCustomRules();
-            }
-
-            await Promise.all(promises);
+            await Promise.race([initPromise, timeoutPromise])
+                .catch(err => {
+                    console.warn('ThreatFox unavailable, continuing without:', err);
+                });
+            
+            this.loadCustomRules();
             this.cache.status = 'active';
             return true;
         } catch (err) {
-            console.warn('Failed to initialize threat intel:', err);
+            console.warn('Partial initialization:', err);
             this.cache.status = 'partial';
-            return false;
+            return true; // Continue anyway
         }
     },
 
