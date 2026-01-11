@@ -8,7 +8,7 @@ const ThreatIntel = {
         status: 'inactive'
     },
 
-    config: {
+    config: { 
         threatfoxAPI: 'https://threatfox-api.abuse.ch/api/v1/',
         alienvaultAPI: 'https://otx.alienvault.com/api/v1/indicators',
         cacheExpiry: 3600000, // 1 hour
