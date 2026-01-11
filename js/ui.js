@@ -1,4 +1,4 @@
-// UI Controller Module
+// UI Controller Module v2.1 - Enhanced
 const UI = {
     showError(message) {
         const errorSection = document.getElementById('errorSection');
@@ -59,20 +59,30 @@ const UI = {
                     <div class="intel-feed">
                         <div class="intel-feed-header">
                             <span class="status-dot status-active"></span>
-                            <span>ThreatFox</span>
+                            <span>Active Sources</span>
                         </div>
                         <div class="intel-feed-info">
-                            ${status.iocCount} IOCs loaded<br>
-                            Last update: ${status.lastUpdate ? new Date(status.lastUpdate).toLocaleTimeString() : 'Never'}
+                            ${status.sources.join(', ')}<br>
+                            ${status.iocCount} IOCs loaded
                         </div>
                     </div>
                     <div class="intel-feed">
                         <div class="intel-feed-header">
                             <span class="status-dot status-active"></span>
-                            <span>Source</span>
+                            <span>Custom Rules</span>
                         </div>
                         <div class="intel-feed-info">
-                            ${status.source}
+                            ${status.customRuleCount} active rule(s)<br>
+                            <a href="#" onclick="addCustomRule(); return false;" style="color: #22d3ee; font-size: 0.75rem;">Add Rule</a>
+                        </div>
+                    </div>
+                    <div class="intel-feed">
+                        <div class="intel-feed-header">
+                            <span class="status-dot status-active"></span>
+                            <span>Last Update</span>
+                        </div>
+                        <div class="intel-feed-info">
+                            ${status.lastUpdate ? new Date(status.lastUpdate).toLocaleTimeString() : 'Never'}
                         </div>
                     </div>
                 </div>
@@ -102,7 +112,7 @@ const UI = {
             <div class="card fade-in">
                 <div class="card-header">
                     <i class="fas fa-skull-crossbones" style="color: #ef4444;"></i>
-                    <span>Threat Intelligence Matches</span>
+                    <span>Threat Intelligence Matches (${matches.length})</span>
                 </div>
                 ${matches.map(match => `
                     <div class="threat-match">
@@ -111,50 +121,161 @@ const UI = {
                                 <i class="fas fa-exclamation-triangle"></i>
                                 <span>${match.ip}</span>
                             </div>
-                            <span class="threat-tag">${match.threat_type}</span>
+                            ${match.combinedThreatScore ? 
+                                `<span class="threat-tag">Combined Score: ${match.combinedThreatScore}%</span>` : 
+                                `<span class="threat-tag">${match.sources?.[0]?.threat_type || match.threat_type}</span>`
+                            }
                         </div>
+                        ${match.sources && match.sources.length > 1 ? `
+                            <div style="margin-bottom: 1rem; padding: 0.5rem; background: rgba(220, 38, 38, 0.1); border-radius: 0.25rem;">
+                                <strong>⚠️ Multiple Sources Detected (${match.sources.length})</strong>
+                            </div>
+                        ` : ''}
                         <div class="threat-details">
-                            <div class="threat-detail">
-                                <span class="threat-detail-label">Malware:</span>
-                                <span class="threat-detail-value">${match.malware}</span>
-                            </div>
-                            ${match.malware_alias ? `
-                                <div class="threat-detail">
-                                    <span class="threat-detail-label">Alias:</span>
-                                    <span class="threat-detail-value">${match.malware_alias}</span>
+                            ${match.sources ? match.sources.map(source => `
+                                <div style="margin-bottom: 1rem; padding: 0.75rem; background: rgba(30, 41, 59, 0.3); border-radius: 0.25rem;">
+                                    <div style="font-weight: 600; color: #22d3ee; margin-bottom: 0.5rem;">
+                                        Source: ${source.source}
+                                    </div>
+                                    <div class="threat-detail">
+                                        <span class="threat-detail-label">Malware:</span>
+                                        <span class="threat-detail-value">${source.malware}</span>
+                                    </div>
+                                    <div class="threat-detail">
+                                        <span class="threat-detail-label">Confidence:</span>
+                                        <span class="threat-detail-value">${source.confidence_level}%</span>
+                                    </div>
+                                    ${source.first_seen ? `
+                                        <div class="threat-detail">
+                                            <span class="threat-detail-label">First Seen:</span>
+                                            <span class="threat-detail-value">${source.first_seen}</span>
+                                        </div>
+                                    ` : ''}
                                 </div>
-                            ` : ''}
-                            <div class="threat-detail">
-                                <span class="threat-detail-label">Confidence:</span>
-                                <span class="threat-detail-value">${match.confidence_level}%</span>
-                            </div>
-                            <div class="threat-detail">
-                                <span class="threat-detail-label">First Seen:</span>
-                                <span class="threat-detail-value">${match.first_seen}</span>
-                            </div>
+                            `).join('') : `
+                                <div class="threat-detail">
+                                    <span class="threat-detail-label">Malware:</span>
+                                    <span class="threat-detail-value">${match.malware}</span>
+                                </div>
+                                <div class="threat-detail">
+                                    <span class="threat-detail-label">Confidence:</span>
+                                    <span class="threat-detail-value">${match.confidence_level}%</span>
+                                </div>
+                            `}
                             <div class="threat-detail">
                                 <span class="threat-detail-label">Connections:</span>
                                 <span class="threat-detail-value">${match.connection_count}</span>
                             </div>
-                            ${match.tags && match.tags.length > 0 ? `
-                                <div class="threat-detail">
-                                    <span class="threat-detail-label">Tags:</span>
-                                    <span class="threat-detail-value">${match.tags.join(', ')}</span>
-                                </div>
-                            ` : ''}
-                            ${match.reference ? `
-                                <div class="threat-detail">
-                                    <span class="threat-detail-label">Reference:</span>
-                                    <span class="threat-detail-value">
-                                        <a href="${match.reference}" target="_blank" style="color: #22d3ee;">
-                                            ${match.reference}
-                                        </a>
-                                    </span>
-                                </div>
-                            ` : ''}
                         </div>
                     </div>
                 `).join('')}
+            </div>
+        `;
+    },
+
+    renderMLResults(mlResults) {
+        if (!mlResults) return '';
+
+        const ensemble = mlResults.ensemble;
+        const anomaly = mlResults.models?.anomaly_detector;
+
+        return `
+            <div class="card fade-in">
+                <div class="card-header">
+                    <i class="fas fa-brain icon-cyan"></i>
+                    <span>Machine Learning Analysis</span>
+                </div>
+                
+                <div class="grid grid-2">
+                    <div class="framework-card">
+                        <div class="framework-header">
+                            <span class="framework-name">Ensemble Prediction</span>
+                            <span class="confidence-badge confidence-${ensemble?.confidence === 'high' ? 'high' : 'medium'}">
+                                ${ensemble?.confidence || 'N/A'}
+                            </span>
+                        </div>
+                        <p style="font-size: 1.5rem; font-weight: 700; margin: 0.5rem 0; color: ${
+                            ensemble?.prediction === 'malicious' ? '#ef4444' : 
+                            ensemble?.prediction === 'suspicious' ? '#f59e0b' : '#22c55e'
+                        };">
+                            ${ensemble?.prediction?.toUpperCase() || 'UNKNOWN'}
+                        </p>
+                        <p class="framework-reason">
+                            ML Score: ${ensemble ? (ensemble.score * 100).toFixed(1) : 'N/A'}%
+                        </p>
+                    </div>
+
+                    <div class="framework-card">
+                        <div class="framework-header">
+                            <span class="framework-name">Anomaly Detection</span>
+                            <span class="confidence-badge ${anomaly?.is_anomaly ? 'confidence-high' : 'confidence-low'}">
+                                ${anomaly?.is_anomaly ? 'ANOMALY' : 'NORMAL'}
+                            </span>
+                        </div>
+                        <p style="font-size: 1.5rem; font-weight: 700; margin: 0.5rem 0;">
+                            ${anomaly ? (anomaly.anomaly_score * 100).toFixed(1) : 'N/A'}%
+                        </p>
+                        <p class="framework-reason">
+                            ${anomaly?.anomaly_factors?.length || 0} anomaly factor(s) detected
+                        </p>
+                    </div>
+                </div>
+
+                ${anomaly?.anomaly_factors && anomaly.anomaly_factors.length > 0 ? `
+                    <details style="margin-top: 1rem;">
+                        <summary>Anomaly Factors (${anomaly.anomaly_factors.length})</summary>
+                        <div style="margin-top: 0.75rem;">
+                            ${anomaly.anomaly_factors.map(f => `
+                                <p style="font-size: 0.875rem; color: #cbd5e1; margin-bottom: 0.5rem;">
+                                    • ${f.factor.replace(/_/g, ' ')}: ${(f.score * 100).toFixed(1)}%
+                                </p>
+                            `).join('')}
+                        </div>
+                    </details>
+                ` : ''}
+            </div>
+        `;
+    },
+
+    renderHistoricalComparison(comparison) {
+        if (!comparison || !comparison.hasEnoughData) return '';
+
+        return `
+            <div class="card fade-in">
+                <div class="card-header">
+                    <i class="fas fa-chart-line icon-cyan"></i>
+                    <span>Historical Comparison</span>
+                </div>
+                
+                <p style="color: #94a3b8; margin-bottom: 1rem;">
+                    Compared with ${comparison.totalHistoricalAnalyses} previous analyses
+                </p>
+
+                <div style="margin-bottom: 1rem;">
+                    ${comparison.interpretation.map(interp => `
+                        <div class="factor-item">${interp}</div>
+                    `).join('')}
+                </div>
+
+                ${comparison.similarAnalyses && comparison.similarAnalyses.length > 0 ? `
+                    <details>
+                        <summary>Similar Analyses (${comparison.similarAnalyses.length})</summary>
+                        <table style="width: 100%; margin-top: 0.75rem; font-size: 0.875rem;">
+                            <tr style="background: rgba(30, 41, 59, 0.3);">
+                                <th style="padding: 0.5rem; text-align: left;">File</th>
+                                <th style="padding: 0.5rem; text-align: left;">Score</th>
+                                <th style="padding: 0.5rem; text-align: left;">Similarity</th>
+                            </tr>
+                            ${comparison.similarAnalyses.map(sim => `
+                                <tr style="border-bottom: 1px solid rgba(51, 65, 85, 0.3);">
+                                    <td style="padding: 0.5rem;">${sim.fileName}</td>
+                                    <td style="padding: 0.5rem;"><strong>${sim.score}%</strong></td>
+                                    <td style="padding: 0.5rem;">${sim.similarity}%</td>
+                                </tr>
+                            `).join('')}
+                        </table>
+                    </details>
+                ` : ''}
             </div>
         `;
     },
@@ -205,6 +326,8 @@ const UI = {
         }[result.severity];
 
         const threatIntelHTML = this.renderThreatIntelMatches(result.threatIntelMatches);
+        const mlHTML = this.renderMLResults(result.mlResults);
+        const historyHTML = this.renderHistoricalComparison(result.historicalComparison);
         const mitreHTML = this.renderMITRETechniques(result.mitreTechniques);
 
         let frameworksHTML = '';
@@ -257,9 +380,17 @@ const UI = {
                     <h2>Analysis Results</h2>
                     <div class="badge-group">
                         <span class="badge ${badgeClass}">${result.classification}</span>
-                        <button class="btn-cyan" onclick="downloadReport()">
+                        <button class="btn-cyan" onclick="downloadReport('json')">
                             <i class="fas fa-download"></i>
-                            <span>Export Report</span>
+                            <span>JSON</span>
+                        </button>
+                        <button class="btn-cyan" onclick="downloadReport('html')">
+                            <i class="fas fa-file-code"></i>
+                            <span>HTML</span>
+                        </button>
+                        <button class="btn-purple" onclick="downloadReport('pdf')">
+                            <i class="fas fa-file-pdf"></i>
+                            <span>PDF</span>
                         </button>
                     </div>
                 </div>
@@ -298,6 +429,8 @@ const UI = {
             </div>
 
             ${threatIntelHTML}
+            ${mlHTML}
+            ${historyHTML}
             ${mitreHTML}
             ${frameworksHTML}
 
