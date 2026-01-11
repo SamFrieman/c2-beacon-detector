@@ -465,14 +465,7 @@ The authors assume no liability for misuse of this tool.
 
 ## Roadmap
 
-### v2.1 (Planned)
-- [ ] Multiple threat intel source integration
-- [ ] Machine learning model integration
-- [ ] Advanced reporting (PDF, HTML)
-- [ ] Historical analysis comparison
-- [ ] Custom detection rule engine
-
-### v2.2 (Future)
+### v2.2 (Planned)
 - [ ] Live packet capture support
 - [ ] Zeek/Suricata log parsing
 - [ ] Collaborative threat hunting
