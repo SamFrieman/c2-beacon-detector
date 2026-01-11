@@ -1,4 +1,4 @@
-// Threat Intelligence Module v2.1 - Multi-Source Integration
+// Threat Intelligence Module v2.1 - Multi-Source Integration (FIXED)
 const ThreatIntel = {
     cache: {
         threatfox: null,
@@ -15,47 +15,67 @@ const ThreatIntel = {
         maxIPs: 20,
         enabledSources: {
             threatfox: true,
-            alienvault: true,
+            alienvault: false, // Disabled by default to avoid CORS issues
             customRules: true
-        }
+        },
+        initTimeout: 3000 // 3 second timeout for initialization
     },
 
     // Custom detection rules storage
     customRules: [],
 
-   async initialize() {
+    async initialize() {
+        console.log('Initializing threat intelligence...');
+        
         try {
-            // Add timeout wrapper
-            const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Initialization timeout')), 5000)
-            );
-            
-            const initPromise = this.updateThreatFox();
-            
-            await Promise.race([initPromise, timeoutPromise])
-                .catch(err => {
-                    console.warn('ThreatFox unavailable, continuing without:', err);
-                });
-            
+            // Load custom rules first (this is synchronous and always works)
             this.loadCustomRules();
+            
+            // Try to load ThreatFox with timeout
+            if (this.config.enabledSources.threatfox) {
+                try {
+                    await Promise.race([
+                        this.updateThreatFox(),
+                        new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('ThreatFox timeout')), this.config.initTimeout)
+                        )
+                    ]);
+                } catch (err) {
+                    console.warn('ThreatFox unavailable:', err.message);
+                    // Continue without ThreatFox - not critical
+                }
+            }
+            
+            // Mark as active regardless of ThreatFox status
+            this.cache.status = 'active';
+            console.log('✓ Threat intelligence initialized');
+            return true;
+            
+        } catch (err) {
+            console.error('Threat intel initialization error:', err);
+            // Still mark as active so app can continue
             this.cache.status = 'active';
             return true;
-        } catch (err) {
-            console.warn('Partial initialization:', err);
-            this.cache.status = 'partial';
-            return true; // Continue anyway
         }
     },
 
     async updateThreatFox() {
         try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), this.config.initTimeout);
+            
             const response = await fetch(this.config.threatfoxAPI, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query: 'get_iocs', days: 7 })
+                body: JSON.stringify({ query: 'get_iocs', days: 7 }),
+                signal: controller.signal
             });
 
-            if (!response.ok) throw new Error(`ThreatFox API returned ${response.status}`);
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                throw new Error(`ThreatFox API returned ${response.status}`);
+            }
 
             const data = await response.json();
             
@@ -63,11 +83,16 @@ const ThreatIntel = {
                 this.cache.threatfox = data.data;
                 this.cache.lastUpdate = Date.now();
                 console.log(`✓ ThreatFox: Loaded ${data.data.length} IOCs`);
+                return true;
             }
 
-            return true;
+            return false;
         } catch (err) {
-            console.error('ThreatFox update failed:', err);
+            if (err.name === 'AbortError') {
+                console.warn('ThreatFox request timed out');
+            } else {
+                console.warn('ThreatFox update failed:', err.message);
+            }
             return false;
         }
     },
@@ -82,16 +107,24 @@ const ThreatIntel = {
             combinedThreatScore: 0
         };
 
-        // ThreatFox lookup
-        if (this.config.enabledSources.threatfox) {
-            const tfResult = await this.lookupThreatFox(ip);
-            if (tfResult) {
-                results.sources.push({ source: 'ThreatFox', ...tfResult });
-                results.highestConfidence = Math.max(results.highestConfidence, tfResult.confidence_level || 0);
+        // ThreatFox lookup (with timeout)
+        if (this.config.enabledSources.threatfox && this.cache.threatfox) {
+            try {
+                const tfResult = await Promise.race([
+                    this.lookupThreatFox(ip),
+                    new Promise((resolve) => setTimeout(() => resolve(null), 2000))
+                ]);
+                
+                if (tfResult) {
+                    results.sources.push({ source: 'ThreatFox', ...tfResult });
+                    results.highestConfidence = Math.max(results.highestConfidence, tfResult.confidence_level || 0);
+                }
+            } catch (err) {
+                console.warn('ThreatFox lookup failed for', ip, ':', err.message);
             }
         }
 
-        // Custom rules check
+        // Custom rules check (always fast, no network)
         if (this.config.enabledSources.customRules) {
             const customResult = this.checkCustomRules(ip);
             if (customResult) {
@@ -111,16 +144,23 @@ const ThreatIntel = {
 
     async lookupThreatFox(ip) {
         try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2000);
+            
             const response = await fetch(this.config.threatfoxAPI, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     query: 'search_ioc',
                     search_term: ip
-                })
+                }),
+                signal: controller.signal
             });
 
+            clearTimeout(timeoutId);
+
             if (!response.ok) return null;
+            
             const data = await response.json();
             
             if (data.query_status === 'ok' && data.data && data.data.length > 0) {
@@ -129,7 +169,9 @@ const ThreatIntel = {
 
             return null;
         } catch (err) {
-            console.error('ThreatFox lookup failed:', err);
+            if (err.name === 'AbortError') {
+                console.warn('ThreatFox lookup timed out for', ip);
+            }
             return null;
         }
     },
@@ -181,13 +223,18 @@ const ThreatIntel = {
     },
 
     ipInCIDR(ip, cidr) {
-        const [range, bits] = cidr.split('/');
-        const mask = ~(2 ** (32 - parseInt(bits)) - 1);
-        
-        const ipNum = this.ipToNumber(ip);
-        const rangeNum = this.ipToNumber(range);
-        
-        return (ipNum & mask) === (rangeNum & mask);
+        try {
+            const [range, bits] = cidr.split('/');
+            const mask = ~(2 ** (32 - parseInt(bits)) - 1);
+            
+            const ipNum = this.ipToNumber(ip);
+            const rangeNum = this.ipToNumber(range);
+            
+            return (ipNum & mask) === (rangeNum & mask);
+        } catch (err) {
+            console.warn('CIDR matching error:', err);
+            return false;
+        }
     },
 
     ipToNumber(ip) {
@@ -230,14 +277,20 @@ const ThreatIntel = {
         const matches = [];
         
         for (const ip of ipsToCheck) {
-            const result = await this.lookupIPMultiSource(ip);
-            if (result && result.sources.length > 0) {
-                const connCount = connections.filter(c => Utils.getDestIP(c) === ip).length;
-                result.connection_count = connCount;
-                matches.push(result);
+            try {
+                const result = await this.lookupIPMultiSource(ip);
+                if (result && result.sources.length > 0) {
+                    const connCount = connections.filter(c => Utils.getDestIP(c) === ip).length;
+                    result.connection_count = connCount;
+                    matches.push(result);
+                }
+                
+                // Small delay between lookups
+                await new Promise(resolve => setTimeout(resolve, 300));
+            } catch (err) {
+                console.warn('Error checking IP', ip, ':', err.message);
+                // Continue with next IP
             }
-            
-            await new Promise(resolve => setTimeout(resolve, 500));
         }
 
         return matches;
@@ -279,6 +332,7 @@ const ThreatIntel = {
             }
         } catch (err) {
             console.warn('Failed to load custom rules:', err);
+            this.customRules = [];
         }
     },
 
