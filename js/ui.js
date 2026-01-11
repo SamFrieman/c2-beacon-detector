@@ -53,7 +53,30 @@ const UI = {
     updateThreatIntelStatus(status) {
         const content = document.getElementById('threatIntelContent');
         
-        if (status.active) {
+        // Handle initializing state
+        if (status.status === 'initializing') {
+            content.innerHTML = `
+                <div class="intel-status">
+                    <div class="intel-feed">
+                        <div class="intel-feed-header">
+                            <span class="status-dot" style="background: #f59e0b; box-shadow: 0 0 8px #f59e0b;"></span>
+                            <span>Initializing...</span>
+                        </div>
+                        <div class="intel-feed-info">
+                            Loading threat intelligence feeds...
+                        </div>
+                    </div>
+                </div>
+            `;
+            return;
+        }
+        
+        // Handle active state
+        if (status.active || status.status === 'active') {
+            const sourcesText = status.sources.length > 0 
+                ? status.sources.join(', ') 
+                : 'None';
+                
             content.innerHTML = `
                 <div class="intel-status">
                     <div class="intel-feed">
@@ -62,8 +85,8 @@ const UI = {
                             <span>Active Sources</span>
                         </div>
                         <div class="intel-feed-info">
-                            ${status.sources.join(', ')}<br>
-                            ${status.iocCount} IOCs loaded
+                            ${sourcesText}<br>
+                            ${status.iocCount > 0 ? `${status.iocCount} IOCs loaded` : 'Using custom rules only'}
                         </div>
                     </div>
                     <div class="intel-feed">
@@ -82,12 +105,14 @@ const UI = {
                             <span>Last Update</span>
                         </div>
                         <div class="intel-feed-info">
-                            ${status.lastUpdate ? new Date(status.lastUpdate).toLocaleTimeString() : 'Never'}
+                            ${status.lastUpdate ? new Date(status.lastUpdate).toLocaleTimeString() : 'Not available'}
                         </div>
                     </div>
                 </div>
             `;
-        } else {
+        } 
+        // Handle offline state
+        else {
             content.innerHTML = `
                 <div class="intel-status">
                     <div class="intel-feed">
@@ -98,6 +123,7 @@ const UI = {
                         <div class="intel-feed-info">
                             Threat intelligence unavailable<br>
                             Using behavioral analysis only
+                            ${status.customRuleCount > 0 ? `<br>${status.customRuleCount} custom rules active` : ''}
                         </div>
                     </div>
                 </div>
