@@ -1,40 +1,41 @@
-// Threat Intelligence Module v2.1 - Multi-Source Integration (FIXED)
+// Threat Intelligence Module v2.1 - FIXED
 const ThreatIntel = {
     cache: {
         threatfox: null,
         alienvault: null,
         localRules: null,
         lastUpdate: null,
-        status: 'inactive'
+        status: 'initializing' // Start as initializing
     },
 
     config: { 
         threatfoxAPI: 'https://threatfox-api.abuse.ch/api/v1/',
         alienvaultAPI: 'https://otx.alienvault.com/api/v1/indicators',
-        cacheExpiry: 3600000, // 1 hour
+        cacheExpiry: 3600000,
         maxIPs: 20,
         enabledSources: {
             threatfox: true,
-            alienvault: false, // Disabled by default to avoid CORS issues
+            alienvault: false,
             customRules: true
         },
-        initTimeout: 3000 // 3 second timeout for initialization
+        initTimeout: 5000 // Increased to 5 seconds
     },
 
-    // Custom detection rules storage
     customRules: [],
 
     async initialize() {
         console.log('Initializing threat intelligence...');
+        this.cache.status = 'initializing';
         
         try {
-            // Load custom rules first (this is synchronous and always works)
+            // Load custom rules first (always succeeds)
             this.loadCustomRules();
             
             // Try to load ThreatFox with timeout
+            let threatFoxLoaded = false;
             if (this.config.enabledSources.threatfox) {
                 try {
-                    await Promise.race([
+                    threatFoxLoaded = await Promise.race([
                         this.updateThreatFox(),
                         new Promise((_, reject) => 
                             setTimeout(() => reject(new Error('ThreatFox timeout')), this.config.initTimeout)
@@ -42,20 +43,24 @@ const ThreatIntel = {
                     ]);
                 } catch (err) {
                     console.warn('ThreatFox unavailable:', err.message);
-                    // Continue without ThreatFox - not critical
                 }
             }
             
-            // Mark as active regardless of ThreatFox status
-            this.cache.status = 'active';
-            console.log('✓ Threat intelligence initialized');
+            // Set status based on what actually loaded
+            if (threatFoxLoaded || this.customRules.length > 0) {
+                this.cache.status = 'active';
+                console.log('✓ Threat intelligence initialized');
+            } else {
+                this.cache.status = 'offline';
+                console.warn('⚠ Threat intelligence running in offline mode');
+            }
+            
             return true;
             
         } catch (err) {
             console.error('Threat intel initialization error:', err);
-            // Still mark as active so app can continue
-            this.cache.status = 'active';
-            return true;
+            this.cache.status = 'offline';
+            return false;
         }
     },
 
@@ -133,7 +138,6 @@ const ThreatIntel = {
             }
         }
 
-        // Calculate combined threat score
         if (results.sources.length > 0) {
             results.combinedThreatScore = this.calculateCombinedScore(results.sources);
             return results;
@@ -206,7 +210,6 @@ const ThreatIntel = {
                 };
             }
             
-            // CIDR range matching
             if (rule.type === 'cidr' && this.ipInCIDR(ip, rule.value)) {
                 return {
                     ip: ip,
@@ -244,7 +247,6 @@ const ThreatIntel = {
     calculateCombinedScore(sources) {
         if (sources.length === 0) return 0;
         
-        // Weight by source reliability
         const weights = {
             'ThreatFox': 1.0,
             'AlienVault OTX': 0.9,
@@ -261,7 +263,6 @@ const ThreatIntel = {
             totalWeight += weight;
         });
 
-        // Bonus for multiple source agreement
         if (sources.length > 1) {
             totalScore *= 1.2;
         }
@@ -285,11 +286,9 @@ const ThreatIntel = {
                     matches.push(result);
                 }
                 
-                // Small delay between lookups
                 await new Promise(resolve => setTimeout(resolve, 300));
             } catch (err) {
                 console.warn('Error checking IP', ip, ':', err.message);
-                // Continue with next IP
             }
         }
 
@@ -368,6 +367,7 @@ const ThreatIntel = {
             iocCount: this.cache.threatfox ? this.cache.threatfox.length : 0,
             customRuleCount: this.customRules.length,
             lastUpdate: this.cache.lastUpdate,
+            status: this.cache.status, // Add explicit status field
             sources: Object.entries(this.config.enabledSources)
                 .filter(([_, enabled]) => enabled)
                 .map(([source]) => source)
