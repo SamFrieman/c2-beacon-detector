@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>C2 Beacon Detector - Professional Network Analysis</title>
+    <title>C2 Beacon Detector v2.1 - Professional Network Analysis</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -16,14 +16,20 @@
                         <i class="fas fa-shield-alt"></i>
                     </div>
                     <div>
-                        <h1>C2 Beacon Detector</h1>
-                        <div class="subtitle">Behavioral Network Traffic Analysis with Threat Intel</div>
+                        <h1>C2 Beacon Detector <span style="font-size: 0.6em; color: #22d3ee;">v2.1</span></h1>
+                        <div class="subtitle">ML-Powered Behavioral Analysis with Multi-Source Threat Intel</div>
                     </div>
                 </div>
-                <a href="https://github.com/samfrieman/c2-beacon-detector" class="github-link" target="_blank">
-                    <i class="fab fa-github"></i>
-                    <span>View Source</span>
-                </a>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <button class="btn-purple" onclick="viewHistory()" title="View analysis history (Ctrl+H)">
+                        <i class="fas fa-history"></i>
+                        <span>History</span>
+                    </button>
+                    <a href="https://github.com/SamFrieman/c2-beacon-detector" class="github-link" target="_blank">
+                        <i class="fab fa-github"></i>
+                        <span>View Source</span>
+                    </a>
+                </div>
             </div>
         </div>
     </header>
@@ -77,7 +83,7 @@
         <div id="threatIntelStatus" class="card">
             <div class="card-header">
                 <i class="fas fa-database icon-cyan"></i>
-                <span>Threat Intelligence Status</span>
+                <span>Threat Intelligence & ML Status</span>
             </div>
             <div id="threatIntelContent">
                 <p style="color: #94a3b8;">Loading threat intelligence feeds...</p>
@@ -103,48 +109,90 @@
         <div id="infoSection" class="card">
             <div class="card-header">
                 <i class="fas fa-info-circle icon-cyan"></i>
-                <span>How This Works</span>
+                <span>What's New in v2.1</span>
             </div>
             <div class="info-grid">
                 <div class="info-section">
-                    <h4>Behavioral Analysis</h4>
+                    <h4>Multi-Source Threat Intel</h4>
                     <ul>
-                        <li>• Timing pattern analysis</li>
-                        <li>• Periodicity detection</li>
-                        <li>• Jitter calculation</li>
-                        <li>• Payload consistency</li>
+                        <li>• ThreatFox API integration</li>
+                        <li>• Custom detection rules</li>
+                        <li>• Combined confidence scoring</li>
+                        <li>• CIDR range matching</li>
                     </ul>
                 </div>
                 <div class="info-section">
-                    <h4>Threat Intelligence</h4>
+                    <h4>Machine Learning</h4>
                     <ul>
-                        <li>• ThreatFox IOC lookups</li>
-                        <li>• Abuse.ch IP blacklists</li>
-                        <li>• Known C2 infrastructure</li>
-                        <li>• Real-time threat feeds</li>
+                        <li>• Beacon classifier model</li>
+                        <li>• Anomaly detection</li>
+                        <li>• Ensemble predictions</li>
+                        <li>• Adaptive learning</li>
                     </ul>
                 </div>
                 <div class="info-section">
-                    <h4>Detection Methods</h4>
+                    <h4>Advanced Reporting</h4>
                     <ul>
-                        <li>• Statistical anomaly detection</li>
-                        <li>• Known C2 signatures</li>
-                        <li>• Framework identification</li>
+                        <li>• HTML report export</li>
+                        <li>• PDF generation</li>
+                        <li>• Enhanced JSON format</li>
+                        <li>• Professional IR reports</li>
+                    </ul>
+                </div>
+                <div class="info-section">
+                    <h4>Historical Analysis</h4>
+                    <ul>
+                        <li>• Automatic history tracking</li>
+                        <li>• Trend analysis</li>
+                        <li>• Similar pattern detection</li>
+                        <li>• Percentile comparison</li>
+                    </ul>
+                </div>
+                <div class="info-section">
+                    <h4>Custom Rules Engine</h4>
+                    <ul>
+                        <li>• IP-based rules</li>
+                        <li>• CIDR range support</li>
+                        <li>• Import/export rules</li>
+                        <li>• Configurable confidence</li>
+                    </ul>
+                </div>
+                <div class="info-section">
+                    <h4>Enhanced Detection</h4>
+                    <ul>
+                        <li>• Multi-factor scoring</li>
                         <li>• MITRE ATT&CK mapping</li>
+                        <li>• Framework fingerprinting</li>
+                        <li>• Entropy analysis</li>
                     </ul>
                 </div>
+            </div>
+            
+            <div style="margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid #334155;">
+                <h4 style="color: #22d3ee; margin-bottom: 0.75rem;">Keyboard Shortcuts</h4>
+                <p style="font-size: 0.875rem; color: #cbd5e1;">
+                    <kbd style="background: #1e293b; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-family: monospace;">Ctrl+H</kbd> View History &nbsp;&nbsp;
+                    <kbd style="background: #1e293b; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-family: monospace;">Ctrl+E</kbd> Export Report
+                </p>
             </div>
         </div>
     </main>
 
     <footer>
         <div class="container">
-            <p>Built for authorized security analysis only. Use responsibly. Threat intel powered by Abuse.ch ThreatFox.</p>
+            <p>Built for authorized security analysis only. Use responsibly.</p>
+            <p style="margin-top: 0.5rem; font-size: 0.75rem;">
+                v2.1.0 | Powered by ThreatFox, Machine Learning & Open Source Intelligence
+            </p>
         </div>
     </footer>
 
+    <!-- Core Libraries -->
     <script src="utils.js"></script>
     <script src="threat-intel.js"></script>
+    <script src="ml-detector.js"></script>
+    <script src="history-manager.js"></script>
+    <script src="report-generator.js"></script>
     <script src="analyzer.js"></script>
     <script src="detector.js"></script>
     <script src="ui.js"></script>
