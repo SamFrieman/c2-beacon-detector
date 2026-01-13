@@ -51,84 +51,80 @@ const UI = {
     },
 
     updateThreatIntelStatus(status) {
-        const content = document.getElementById('threatIntelContent');
-        
-        // Handle initializing state
-        if (status.status === 'initializing') {
-            content.innerHTML = `
-                <div class="intel-status">
-                    <div class="intel-feed">
-                        <div class="intel-feed-header">
-                            <span class="status-dot" style="background: #f59e0b; box-shadow: 0 0 8px #f59e0b;"></span>
-                            <span>Initializing...</span>
-                        </div>
-                        <div class="intel-feed-info">
-                            Loading threat intelligence feeds...
-                        </div>
-                    </div>
-                </div>
-            `;
-            return;
+        const statusElement = document.getElementById('threatIntelContent');
+    
+        if (!statusElement) return;
+    
+        const sources = stats.sources || {};
+        const threatfoxStatus = sources.threatfox || {};
+        const customRulesStatus = sources.customRules || {};
+
+        // Build status HTML
+        let html = '<div class="intel-status">';
+
+        // ThreatFox Status
+        html += '<div class="intel-feed">';
+        html += '<div class="intel-feed-header">';
+        html += `<span class="status-dot ${threatfoxStatus.status === 'active' ? 'status-active' : 'status-inactive'}"></span>`;
+        html += '<span>ThreatFox API</span>';
+        html += '</div>';
+        html += '<div class="intel-feed-info">';
+
+        if (threatfoxStatus.status === 'active') {
+            html += `✓ Online - ${threatfoxStatus.iocs || 0} IOCs loaded`;
+        } else {
+            html += '⚠ Offline - Working in degraded mode';
+            if (stats.error) {
+                html += `<br><small style="color: #f87171;">Error: ${stats.error}</small>`;
+            }
         }
-        
-        // Handle active state
-        if (status.active || status.status === 'active') {
-            const sourcesText = status.sources.length > 0 
-                ? status.sources.join(', ') 
-                : 'None';
-                
-            content.innerHTML = `
-                <div class="intel-status">
-                    <div class="intel-feed">
-                        <div class="intel-feed-header">
-                            <span class="status-dot status-active"></span>
-                            <span>Active Sources</span>
-                        </div>
-                        <div class="intel-feed-info">
-                            ${sourcesText}<br>
-                            ${status.iocCount > 0 ? `${status.iocCount} IOCs loaded` : 'Using custom rules only'}
-                        </div>
-                    </div>
-                    <div class="intel-feed">
-                        <div class="intel-feed-header">
-                            <span class="status-dot status-active"></span>
-                            <span>Custom Rules</span>
-                        </div>
-                        <div class="intel-feed-info">
-                            ${status.customRuleCount} active rule(s)<br>
-                            <a href="#" onclick="addCustomRule(); return false;" style="color: #22d3ee; font-size: 0.75rem;">Add Rule</a>
-                        </div>
-                    </div>
-                    <div class="intel-feed">
-                        <div class="intel-feed-header">
-                            <span class="status-dot status-active"></span>
-                            <span>Last Update</span>
-                        </div>
-                        <div class="intel-feed-info">
-                            ${status.lastUpdate ? new Date(status.lastUpdate).toLocaleTimeString() : 'Not available'}
-                        </div>
-                    </div>
-                </div>
-            `;
-        } 
-        // Handle offline state
-        else {
-            content.innerHTML = `
-                <div class="intel-status">
-                    <div class="intel-feed">
-                        <div class="intel-feed-header">
-                            <span class="status-dot status-inactive"></span>
-                            <span>Offline Mode</span>
-                        </div>
-                        <div class="intel-feed-info">
-                            Threat intelligence unavailable<br>
-                            Using behavioral analysis only
-                            ${status.customRuleCount > 0 ? `<br>${status.customRuleCount} custom rules active` : ''}
-                        </div>
-                    </div>
+
+        html += '</div>';
+        html += '</div>';
+
+        // Custom Rules Status
+        html += '<div class="intel-feed">';
+        html += '<div class="intel-feed-header">';
+        html += `<span class="status-dot ${customRulesStatus.status === 'active' ? 'status-active' : 'status-inactive'}"></span>`;
+        html += '<span>Custom Rules</span>';
+        html += '</div>';
+        html += '<div class="intel-feed-info">';
+        html += `✓ Active - ${customRulesStatus.count || 0} rule(s) loaded`;
+        html += '</div>';
+        html += '</div>';
+
+        if (typeof MLDetector !== 'undefined') {
+            const mlStats = MLDetector.getStats ? MLDetector.getStats() : { enabled: true };
+            html += '<div class="intel-feed">';
+            html += '<div class="intel-feed-header">';
+            html += `<span class="status-dot status-active"></span>`;
+            html += '<span>Machine Learning</span>';
+            html += '</div>';
+            html += '<div class="intel-feed-info">';
+            html += `✓ Enabled - Beacon classifier active`;
+            html += '</div>';
+            html += '</div>';
+        }
+
+        html += '</div>';
+
+        // Add informational message if ThreatFox is offline
+        if (threatfoxStatus.status !== 'active') {
+            html += `
+                <div style="margin-top: 1rem; padding: 1rem; background: rgba(234, 179, 8, 0.1); border-left: 3px solid #eab308; border-radius: 0.5rem;">
+                    <p style="font-size: 0.875rem; color: #fef08a; margin: 0;">
+                        <strong>ℹ️ Note:</strong> ThreatFox API is currently unavailable. The tool will continue to work using:
+                    </p>
+                    <ul style="font-size: 0.875rem; color: #fef08a; margin: 0.5rem 0 0 1.5rem;">
+                        <li>Custom detection rules</li>
+                        <li>Behavioral analysis</li>
+                        <li>Machine learning models</li>
+                    </ul>
                 </div>
             `;
         }
+        
+        statusElement.innerHTML = html;
     },
 
     renderThreatIntelMatches(matches) {
