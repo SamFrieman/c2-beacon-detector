@@ -1,277 +1,302 @@
-// Historical Analysis Manager v2.1
+// history-manager.js - Historical Analysis Management
+// Version 2.1.1
+
 const HistoryManager = {
-    history: [],
     maxHistorySize: 100,
+    storageKey: 'c2detector_history',
+    history: [],
 
     initialize() {
         this.loadHistory();
-        console.log(`✓ Loaded ${this.history.length} historical analyses`);
-    },
-
-    saveAnalysis(analysis, fileName, connections) {
-        const record = {
-            id: this.generateId(),
-            timestamp: new Date().toISOString(),
-            fileName: fileName,
-            summary: {
-                score: analysis.score,
-                classification: analysis.classification,
-                severity: analysis.severity,
-                connectionCount: connections.length,
-                duration: analysis.features.duration_minutes,
-                threatIntelMatches: analysis.threatIntelMatches?.length || 0,
-                mlPrediction: analysis.mlResults?.ensemble?.prediction || 'N/A'
-            },
-            features: analysis.features,
-            fullAnalysis: analysis
-        };
-
-        this.history.unshift(record); // Add to beginning
-
-        // Limit history size
-        if (this.history.length > this.maxHistorySize) {
-            this.history = this.history.slice(0, this.maxHistorySize);
-        }
-
-        this.persistHistory();
-        return record.id;
+        console.log(`History: ${this.history.length} analyses loaded`);
+        return this.history.length;
     },
 
     loadHistory() {
         try {
-            const saved = localStorage.getItem('c2detector_history');
-            if (saved) {
-                this.history = JSON.parse(saved);
+            const stored = localStorage.getItem(this.storageKey);
+            if (stored) {
+                this.history = JSON.parse(stored);
+                
+                // Sort by timestamp (newest first)
+                this.history.sort((a, b) => 
+                    new Date(b.timestamp) - new Date(a.timestamp)
+                );
             }
-        } catch (err) {
-            console.warn('Failed to load history:', err);
+        } catch (error) {
+            console.error('Failed to load history:', error);
             this.history = [];
         }
     },
 
-    persistHistory() {
+    saveHistory() {
         try {
-            localStorage.setItem('c2detector_history', JSON.stringify(this.history));
-        } catch (err) {
-            console.error('Failed to save history:', err);
+            // Keep only maxHistorySize most recent
+            if (this.history.length > this.maxHistorySize) {
+                this.history = this.history.slice(0, this.maxHistorySize);
+            }
+            
+            localStorage.setItem(this.storageKey, JSON.stringify(this.history));
+        } catch (error) {
+            console.error('Failed to save history:', error);
+            
+            // If quota exceeded, remove oldest entries
+            if (error.name === 'QuotaExceededError') {
+                this.history = this.history.slice(0, 50);
+                this.saveHistory();
+            }
         }
     },
 
-    getHistory(limit = 10) {
-        return this.history.slice(0, limit);
+    addAnalysis(analysis) {
+        // Add ID if not present
+        if (!analysis.id) {
+            analysis.id = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+        }
+
+        // Ensure timestamp
+        if (!analysis.timestamp) {
+            analysis.timestamp = new Date().toISOString();
+        }
+
+        // Add to beginning of array
+        this.history.unshift(analysis);
+        
+        // Save
+        this.saveHistory();
+        
+        console.log(`Added analysis to history: ${analysis.id}`);
+        return analysis.id;
     },
 
-    getById(id) {
-        return this.history.find(h => h.id === id);
+    getHistory(limit = null) {
+        if (limit) {
+            return this.history.slice(0, limit);
+        }
+        return [...this.history];
     },
 
-    deleteById(id) {
-        this.history = this.history.filter(h => h.id !== id);
-        this.persistHistory();
+    getAnalysis(id) {
+        return this.history.find(a => a.id === id);
+    },
+
+    deleteAnalysis(id) {
+        const index = this.history.findIndex(a => a.id === id);
+        if (index !== -1) {
+            this.history.splice(index, 1);
+            this.saveHistory();
+            return true;
+        }
+        return false;
     },
 
     clearHistory() {
         this.history = [];
-        this.persistHistory();
+        this.saveHistory();
+        console.log('History cleared');
     },
 
-    generateId() {
-        return `analysis_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    },
-
-    // Statistical comparison
-    compareWithHistory(currentAnalysis) {
-        if (this.history.length < 5) {
-            return {
-                hasEnoughData: false,
-                message: 'Need at least 5 historical analyses for comparison'
-            };
+    getStats() {
+        if (this.history.length === 0) {
+            return null;
         }
 
-        const historicalScores = this.history.map(h => h.summary.score);
-        const historicalJitter = this.history.map(h => h.features.jitter);
-        const historicalPeriodicity = this.history.map(h => h.features.periodicity);
-
-        const stats = {
-            score: this.calculatePercentile(currentAnalysis.score, historicalScores),
-            jitter: this.calculatePercentile(currentAnalysis.features.jitter, historicalJitter),
-            periodicity: this.calculatePercentile(currentAnalysis.features.periodicity, historicalPeriodicity)
-        };
+        const scores = this.history.map(a => a.score);
+        const classifications = this.history.reduce((acc, a) => {
+            acc[a.classification] = (acc[a.classification] || 0) + 1;
+            return acc;
+        }, {});
 
         return {
-            hasEnoughData: true,
-            totalHistoricalAnalyses: this.history.length,
-            percentiles: stats,
-            interpretation: this.interpretComparison(stats),
-            similarAnalyses: this.findSimilarAnalyses(currentAnalysis, 3)
+            total: this.history.length,
+            avgScore: scores.reduce((a, b) => a + b, 0) / scores.length,
+            maxScore: Math.max(...scores),
+            minScore: Math.min(...scores),
+            classifications: classifications
         };
     },
 
-    calculatePercentile(value, dataset) {
-        const sorted = [...dataset].sort((a, b) => a - b);
-        const index = sorted.findIndex(v => v >= value);
-        const percentile = index === -1 ? 100 : (index / sorted.length) * 100;
+    calculatePercentile(score) {
+        if (this.history.length === 0) return null;
         
-        return {
-            value: value,
-            percentile: Math.round(percentile),
-            min: Math.min(...sorted),
-            max: Math.max(...sorted),
-            median: sorted[Math.floor(sorted.length / 2)],
-            mean: sorted.reduce((a, b) => a + b, 0) / sorted.length
-        };
+        const scores = this.history.map(a => a.score).sort((a, b) => a - b);
+        const lowerScores = scores.filter(s => s < score).length;
+        
+        return (lowerScores / scores.length) * 100;
     },
 
-    interpretComparison(stats) {
-        const interpretations = [];
+    findSimilar(analysis, limit = 5) {
+        if (this.history.length === 0) return [];
 
-        if (stats.score.percentile > 90) {
-            interpretations.push('🔴 This analysis scored higher than 90% of historical analyses');
-        } else if (stats.score.percentile > 70) {
-            interpretations.push('🟡 This analysis scored higher than 70% of historical analyses');
-        } else {
-            interpretations.push('✓ This score is within normal range based on history');
-        }
-
-        if (stats.periodicity.percentile > 85) {
-            interpretations.push('⚠️ Periodicity is unusually high compared to historical data');
-        }
-
-        if (stats.jitter.percentile < 15) {
-            interpretations.push('⚠️ Jitter is unusually low compared to historical data');
-        }
-
-        return interpretations;
-    },
-
-    findSimilarAnalyses(currentAnalysis, count = 3) {
-        const similarities = this.history.map(h => ({
-            analysis: h,
-            similarity: this.calculateSimilarity(currentAnalysis.features, h.features)
-        }));
-
-        return similarities
+        // Calculate similarity scores
+        const similarities = this.history
+            .filter(a => a.id !== analysis.id)
+            .map(a => ({
+                analysis: a,
+                similarity: this.calculateSimilarity(analysis, a)
+            }))
             .sort((a, b) => b.similarity - a.similarity)
-            .slice(0, count)
-            .map(s => ({
-                id: s.analysis.id,
-                fileName: s.analysis.fileName,
-                timestamp: s.analysis.timestamp,
-                score: s.analysis.summary.score,
-                classification: s.analysis.summary.classification,
-                similarity: Math.round(s.similarity * 100)
-            }));
+            .slice(0, limit);
+
+        return similarities;
     },
 
-    calculateSimilarity(features1, features2) {
-        const importantFeatures = [
-            'mean_interval', 'jitter', 'periodicity', 
-            'bytes_consistency', 'entropy', 'unique_dest_ips'
-        ];
+    calculateSimilarity(a1, a2) {
+        let score = 0;
+        let factors = 0;
 
-        let similarity = 0;
-        let count = 0;
+        // Compare scores (normalized difference)
+        const scoreDiff = Math.abs(a1.score - a2.score) / 100;
+        score += (1 - scoreDiff);
+        factors++;
 
-        for (const feature of importantFeatures) {
-            if (features1[feature] !== undefined && features2[feature] !== undefined) {
-                const diff = Math.abs(features1[feature] - features2[feature]);
-                const max = Math.max(features1[feature], features2[feature], 1);
-                similarity += 1 - (diff / max);
-                count++;
+        // Compare classifications
+        if (a1.classification === a2.classification) {
+            score += 1;
+        }
+        factors++;
+
+        // Compare features if available
+        if (a1.features && a2.features) {
+            const f1 = a1.features;
+            const f2 = a2.features;
+
+            // Periodicity similarity
+            if (f1.periodicity !== undefined && f2.periodicity !== undefined) {
+                score += 1 - Math.abs(f1.periodicity - f2.periodicity);
+                factors++;
+            }
+
+            // Jitter similarity
+            if (f1.jitter !== undefined && f2.jitter !== undefined) {
+                score += 1 - Math.abs(f1.jitter - f2.jitter);
+                factors++;
             }
         }
 
-        return count > 0 ? similarity / count : 0;
+        return factors > 0 ? score / factors : 0;
     },
 
-    // Trend analysis
     getTrends(days = 7) {
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - days);
 
-        const recent = this.history.filter(h => new Date(h.timestamp) > cutoff);
+        const recent = this.history.filter(a => 
+            new Date(a.timestamp) > cutoff
+        );
 
-        if (recent.length === 0) {
-            return { hasData: false };
-        }
+        if (recent.length === 0) return null;
 
-        const scoresByDay = {};
-        const classificationCounts = {
-            CRITICAL: 0,
-            SUSPICIOUS: 0,
-            MONITOR: 0,
-            BENIGN: 0
-        };
-
-        recent.forEach(h => {
-            const day = h.timestamp.split('T')[0];
-            if (!scoresByDay[day]) {
-                scoresByDay[day] = [];
+        // Group by day
+        const byDay = {};
+        recent.forEach(a => {
+            const day = new Date(a.timestamp).toISOString().split('T')[0];
+            if (!byDay[day]) {
+                byDay[day] = [];
             }
-            scoresByDay[day].push(h.summary.score);
-            classificationCounts[h.summary.classification]++;
+            byDay[day].push(a);
         });
 
+        // Calculate daily stats
+        const dailyStats = Object.keys(byDay).map(day => ({
+            date: day,
+            count: byDay[day].length,
+            avgScore: byDay[day].reduce((sum, a) => sum + a.score, 0) / byDay[day].length,
+            critical: byDay[day].filter(a => a.classification === 'CRITICAL').length,
+            suspicious: byDay[day].filter(a => a.classification === 'SUSPICIOUS').length
+        }));
+
         return {
-            hasData: true,
-            totalAnalyses: recent.length,
-            dateRange: {
-                start: recent[recent.length - 1].timestamp.split('T')[0],
-                end: recent[0].timestamp.split('T')[0]
-            },
-            averageScore: recent.reduce((sum, h) => sum + h.summary.score, 0) / recent.length,
-            classificationBreakdown: classificationCounts,
-            dailyAverages: Object.entries(scoresByDay).map(([day, scores]) => ({
-                date: day,
-                averageScore: scores.reduce((a, b) => a + b, 0) / scores.length,
-                count: scores.length
-            }))
+            period: days,
+            total: recent.length,
+            daily: dailyStats,
+            avgScore: recent.reduce((sum, a) => sum + a.score, 0) / recent.length
         };
     },
 
     exportHistory(format = 'json') {
         if (format === 'json') {
-            return JSON.stringify(this.history, null, 2);
+            return JSON.stringify({
+                version: '2.1',
+                exported: new Date().toISOString(),
+                count: this.history.length,
+                analyses: this.history
+            }, null, 2);
         } else if (format === 'csv') {
-            return this.convertToCSV();
+            return this.exportCSV();
         }
+        throw new Error('Unknown format: ' + format);
     },
 
-    convertToCSV() {
+    exportCSV() {
         const headers = [
-            'Timestamp', 'File Name', 'Score', 'Classification', 
-            'Connections', 'Duration (min)', 'Threat Intel Matches',
-            'Mean Interval', 'Jitter', 'Periodicity'
+            'Timestamp',
+            'File Name',
+            'Score',
+            'Classification',
+            'Connection Count',
+            'Threat Intel Matches',
+            'ML Prediction'
         ];
 
-        const rows = this.history.map(h => [
-            h.timestamp,
-            h.fileName,
-            h.summary.score,
-            h.summary.classification,
-            h.summary.connectionCount,
-            h.summary.duration.toFixed(2),
-            h.summary.threatIntelMatches,
-            h.features.mean_interval.toFixed(2),
-            h.features.jitter.toFixed(4),
-            h.features.periodicity.toFixed(4)
+        const rows = this.history.map(a => [
+            a.timestamp,
+            a.fileName || 'N/A',
+            a.score,
+            a.classification,
+            a.connectionCount || 0,
+            a.threatIntel?.matches?.length || 0,
+            a.mlPrediction?.ensemble?.prediction || 'N/A'
         ]);
 
-        return [headers, ...rows]
-            .map(row => row.map(cell => `"${cell}"`).join(','))
-            .join('\n');
+        const csv = [
+            headers.join(','),
+            ...rows.map(row => row.map(cell => {
+                // Escape cells with commas
+                if (typeof cell === 'string' && cell.includes(',')) {
+                    return `"${cell}"`;
+                }
+                return cell;
+            }).join(','))
+        ].join('\n');
+
+        return csv;
     },
 
     importHistory(jsonString) {
         try {
-            const imported = JSON.parse(jsonString);
-            if (Array.isArray(imported)) {
-                this.history = imported;
-                this.persistHistory();
-                return { success: true, count: imported.length };
+            const data = JSON.parse(jsonString);
+            const analyses = data.analyses || data;
+
+            if (!Array.isArray(analyses)) {
+                throw new Error('Invalid history format');
             }
-        } catch (err) {
-            return { success: false, error: err.message };
+
+            // Merge with existing history
+            analyses.forEach(analysis => {
+                // Avoid duplicates
+                if (!this.history.find(a => a.id === analysis.id)) {
+                    this.history.push(analysis);
+                }
+            });
+
+            // Sort and save
+            this.history.sort((a, b) => 
+                new Date(b.timestamp) - new Date(a.timestamp)
+            );
+            
+            this.saveHistory();
+            
+            console.log(`Imported ${analyses.length} analyses`);
+            return true;
+        } catch (error) {
+            console.error('Import failed:', error);
+            throw error;
         }
     }
 };
+
+// Export for use in other modules
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = HistoryManager;
+}
