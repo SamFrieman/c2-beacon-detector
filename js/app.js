@@ -1,304 +1,534 @@
-// Main Application Controller v2.1
-let currentAnalysis = null;
-let currentFileName = null;
-let currentConnections = null;
+// app.js - Main Application Controller with Robust Error Handling
+// Version 2.1.1
 
-// Initialize the application
-async function initializeApp() {
-    try {
-        // Initialize threat intelligence
-        const stats = await ThreatIntel.initialize();
-        updateThreatIntelStatus(stats);
+const C2DetectorApp = {
+    state: {
+        initialized: false,
+        currentAnalysis: null,
+        fileName: null,
+        modules: {
+            utils: false,
+            threatIntel: false,
+            mlDetector: false,
+            historyManager: false,
+            reportGenerator: false,
+            analyzer: false,
+            detector: false,
+            ui: false
+        }
+    },
 
-        // Initialize ML if available
-        if (typeof MLDetector !== 'undefined' && MLDetector.initialize) {
-            await MLDetector.initialize();
+    async initialize() {
+        console.log('Initializing C2 Beacon Detector v2.1...');
+        
+        // Check for required modules
+        this.checkModules();
+        
+        // Initialize UI elements
+        this.initializeUI();
+        
+        // Initialize modules in correct order
+        await this.initializeModules();
+        
+        // Setup event listeners
+        this.setupEventListeners();
+        
+        // Keyboard shortcuts
+        this.setupKeyboardShortcuts();
+        
+        this.state.initialized = true;
+        console.log('✓ Application initialized successfully');
+        console.log('  - Modules loaded:', Object.keys(this.state.modules).filter(k => this.state.modules[k]).length);
+    },
+
+    checkModules() {
+        // Check which modules are available
+        this.state.modules.utils = typeof Utils !== 'undefined';
+        this.state.modules.threatIntel = typeof ThreatIntel !== 'undefined';
+        this.state.modules.mlDetector = typeof MLDetector !== 'undefined';
+        this.state.modules.historyManager = typeof HistoryManager !== 'undefined';
+        this.state.modules.reportGenerator = typeof ReportGenerator !== 'undefined';
+        this.state.modules.analyzer = typeof Analyzer !== 'undefined';
+        this.state.modules.detector = typeof Detector !== 'undefined';
+        this.state.modules.ui = typeof UI !== 'undefined';
+
+        const missing = Object.keys(this.state.modules).filter(k => !this.state.modules[k]);
+        if (missing.length > 0) {
+            console.warn('⚠ Missing modules:', missing);
+            console.warn('Some features may be unavailable');
+        }
+    },
+
+    initializeUI() {
+        // Hide loading on startup
+        const loadingSection = document.getElementById('loadingSection');
+        const errorSection = document.getElementById('errorSection');
+        const resultsSection = document.getElementById('resultsSection');
+        
+        if (loadingSection) loadingSection.classList.add('hidden');
+        if (errorSection) errorSection.classList.add('hidden');
+        if (resultsSection) resultsSection.classList.add('hidden');
+    },
+
+    async initializeModules() {
+        try {
+            // Initialize Threat Intelligence
+            if (this.state.modules.threatIntel) {
+                const stats = await ThreatIntel.initialize();
+                this.updateThreatIntelStatus(stats);
+            }
+
+            // Initialize ML Detector
+            if (this.state.modules.mlDetector) {
+                await MLDetector.initialize();
+                console.log('✓ ML models initialized');
+            }
+
+            // Initialize History Manager
+            if (this.state.modules.historyManager) {
+                const historyCount = HistoryManager.initialize();
+                console.log(`✓ Loaded ${historyCount} historical analyses`);
+            }
+
+            console.log('✓ All systems initialized');
+        } catch (error) {
+            console.error('Initialization error:', error);
+            this.showError('Initialization Error', error.message, true);
+        }
+    },
+
+    setupEventListeners() {
+        // File input
+        const fileInput = document.getElementById('fileInput');
+        if (fileInput) {
+            fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
         }
 
-        console.log('✓ All systems initialized');
-    } catch (error) {
-        console.error('Initialization error:', error);
+        // Upload zone drag and drop
+        const uploadZone = document.getElementById('uploadZone');
+        if (uploadZone) {
+            uploadZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadZone.style.borderColor = '#22d3ee';
+                uploadZone.style.background = 'rgba(34, 211, 238, 0.05)';
+            });
+
+            uploadZone.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                uploadZone.style.borderColor = '';
+                uploadZone.style.background = '';
+            });
+
+            uploadZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadZone.style.borderColor = '';
+                uploadZone.style.background = '';
+                
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    this.handleFile(files[0]);
+                }
+            });
+        }
+    },
+
+    setupKeyboardShortcuts() {
+        document.addEventListener('keydown', (e) => {
+            // Ctrl+H or Cmd+H - View History
+            if ((e.ctrlKey || e.metaKey) && e.key === 'h') {
+                e.preventDefault();
+                this.viewHistory();
+            }
+
+            // Ctrl+E or Cmd+E - Export Report
+            if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
+                e.preventDefault();
+                if (this.state.currentAnalysis) {
+                    this.downloadReport('json');
+                }
+            }
+        });
+    },
+
+    handleFileSelect(event) {
+        const file = event.target.files[0];
+        if (file) {
+            this.handleFile(file);
+        }
+    },
+
+    async handleFile(file) {
+        if (!file.name.endsWith('.json')) {
+            this.showError('Invalid File Type', 'Please upload a JSON file');
+            return;
+        }
+
+        this.state.fileName = file.name;
         
-        // Show error but allow degraded operation
-        document.getElementById('threatIntelContent').innerHTML = `
-            <div style="color: #f87171;">
-                <p>⚠️ Initialization encountered errors, but the tool can still operate with reduced capabilities.</p>
-                <p style="font-size: 0.875rem; margin-top: 0.5rem; color: #fca5a5;">Error: ${error.message}</p>
+        // Show file badge
+        const fileBadge = document.getElementById('fileBadge');
+        if (fileBadge) {
+            fileBadge.innerHTML = `
+                <i class="fas fa-file-code" style="color: #22d3ee;"></i>
+                <span>${file.name}</span>
+                <span style="color: #64748b;">(${this.formatBytes(file.size)})</span>
+            `;
+            fileBadge.classList.remove('hidden');
+            fileBadge.className = 'file-badge';
+        }
+
+        // Read and parse file
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const jsonData = JSON.parse(e.target.result);
+                await this.analyzeData(jsonData);
+            } catch (error) {
+                this.showError('Parse Error', 'Invalid JSON format: ' + error.message);
+            }
+        };
+        reader.readAsText(file);
+    },
+
+    async analyzeData(jsonData) {
+        try {
+            // Hide error and results
+            this.hideError();
+            this.hideResults();
+            
+            // Show loading
+            this.showLoading();
+
+            // Validate data format
+            if (!this.state.modules.utils) {
+                throw new Error('Utils module not loaded');
+            }
+
+            const validationResult = Utils.validateJSON(jsonData);
+            if (!validationResult.valid) {
+                throw new Error(validationResult.error);
+            }
+
+            const connections = validationResult.data;
+            console.log(`Analyzing ${connections.length} connections...`);
+
+            // Update loading status
+            this.updateLoadingStatus('Extracting behavioral features...');
+
+            // Extract features
+            if (!this.state.modules.analyzer) {
+                throw new Error('Analyzer module not loaded');
+            }
+
+            const features = Analyzer.extractFeatures(connections);
+            console.log('Features extracted:', Object.keys(features).length);
+
+            // Update loading status
+            this.updateLoadingStatus('Checking threat intelligence databases...');
+
+            // Run detection
+            if (!this.state.modules.detector) {
+                throw new Error('Detector module not loaded');
+            }
+
+            const analysis = await Detector.analyze(features, connections);
+            
+            // Store current analysis
+            this.state.currentAnalysis = {
+                ...analysis,
+                fileName: this.state.fileName,
+                timestamp: new Date().toISOString(),
+                connectionCount: connections.length
+            };
+
+            // Save to history
+            if (this.state.modules.historyManager) {
+                HistoryManager.addAnalysis(this.state.currentAnalysis);
+            }
+
+            // Update loading status
+            this.updateLoadingStatus('Generating report...');
+
+            // Display results
+            this.hideLoading();
+            this.showResults(this.state.currentAnalysis, connections);
+
+            console.log(`Analysis complete: ${analysis.classification} (Score: ${analysis.score})`);
+
+        } catch (error) {
+            console.error('Analysis error:', error);
+            this.hideLoading();
+            this.showError('Analysis Error', error.message);
+        }
+    },
+
+    // Sample data analysis
+    async analyzeSample(type) {
+        if (!this.state.modules.utils) {
+            this.showError('Error', 'Utils module not loaded');
+            return;
+        }
+
+        let sampleData;
+        let fileName;
+
+        switch (type) {
+            case 'cobalt-strike':
+                sampleData = Utils.generateCobaltStrikeSample();
+                fileName = 'cobalt-strike-sample.json';
+                break;
+            case 'metasploit':
+                sampleData = Utils.generateMetasploitSample();
+                fileName = 'metasploit-sample.json';
+                break;
+            case 'benign':
+                sampleData = Utils.generateBenignSample();
+                fileName = 'benign-traffic-sample.json';
+                break;
+            default:
+                this.showError('Error', 'Unknown sample type');
+                return;
+        }
+
+        this.state.fileName = fileName;
+        await this.analyzeData(sampleData);
+    },
+
+    // UI Update Methods
+    showLoading() {
+        const loadingSection = document.getElementById('loadingSection');
+        if (loadingSection) {
+            loadingSection.classList.remove('hidden');
+        }
+    },
+
+    hideLoading() {
+        const loadingSection = document.getElementById('loadingSection');
+        if (loadingSection) {
+            loadingSection.classList.add('hidden');
+        }
+    },
+
+    updateLoadingStatus(message) {
+        const statusElement = document.getElementById('loadingStatus');
+        if (statusElement) {
+            statusElement.textContent = message;
+        }
+    },
+
+    showError(title, message, isWarning = false) {
+        const errorSection = document.getElementById('errorSection');
+        if (!errorSection) return;
+
+        const iconClass = isWarning ? 'fa-exclamation-triangle' : 'fa-exclamation-circle';
+        const borderColor = isWarning ? '#eab308' : '#b91c1c';
+
+        errorSection.innerHTML = `
+            <div class="error-card fade-in" style="border-color: ${borderColor};">
+                <i class="fas ${iconClass} error-icon"></i>
+                <div>
+                    <div class="error-title">${title}</div>
+                    <div class="error-text">${message}</div>
+                </div>
             </div>
         `;
-    }
-}
+        errorSection.classList.remove('hidden');
+    },
 
-// Enhanced analysis with all v2.1 features
-async function analyzeConnections(connections, fileName) {
-    currentFileName = fileName;
-    currentConnections = connections;
-    UI.hideError();
-    UI.showLoading('Processing network data...');
+    hideError() {
+        const errorSection = document.getElementById('errorSection');
+        if (errorSection) {
+            errorSection.classList.add('hidden');
+        }
+    },
 
-    try {
-        // Validate connections
-        const validation = Utils.validateConnections(connections);
-        if (!validation.isValid) {
-            throw new Error(validation.errors.join('. '));
+    showResults(analysis, connections) {
+        if (!this.state.modules.ui) {
+            this.showError('Error', 'UI module not loaded');
+            return;
         }
 
-        // Update file badge
-        UI.updateFileBadge(fileName, connections.length);
-
-        // Step 1: Extract behavioral features
-        UI.updateLoadingStatus('Extracting behavioral features...');
-        await new Promise(resolve => setTimeout(resolve, 500));
-        const features = Analyzer.extractFeatures(connections);
-
-        // Step 2: Check threat intelligence (multi-source)
-        UI.updateLoadingStatus('Checking threat intelligence databases...');
-        let threatIntelMatches = [];
-        
-        try {
-            threatIntelMatches = await ThreatIntel.checkConnections(connections);
-            console.log(`Found ${threatIntelMatches.length} threat intel matches`);
-        } catch (err) {
-            console.warn('Threat intel lookup failed:', err);
+        const resultsSection = document.getElementById('resultsSection');
+        if (resultsSection) {
+            resultsSection.innerHTML = UI.renderResults(analysis, connections, this.state.fileName);
+            resultsSection.classList.remove('hidden');
+            
+            // Scroll to results
+            resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
 
-        // Step 3: ML prediction
-        UI.updateLoadingStatus('Running machine learning models...');
-        await new Promise(resolve => setTimeout(resolve, 300));
-        let mlResults = null;
-        
-        try {
-            mlResults = await MLDetector.predict(features);
-            console.log('ML prediction:', mlResults?.ensemble?.prediction);
-        } catch (err) {
-            console.warn('ML prediction failed:', err);
+        // Hide info section
+        const infoSection = document.getElementById('infoSection');
+        if (infoSection) {
+            infoSection.style.display = 'none';
+        }
+    },
+
+    hideResults() {
+        const resultsSection = document.getElementById('resultsSection');
+        if (resultsSection) {
+            resultsSection.classList.add('hidden');
         }
 
-        // Step 4: Run detection engine
-        UI.updateLoadingStatus('Running detection algorithms...');
-        await new Promise(resolve => setTimeout(resolve, 500));
-        const result = Detector.detect(features, threatIntelMatches);
-        
-        // Add ML results to analysis
-        result.mlResults = mlResults;
+        // Show info section
+        const infoSection = document.getElementById('infoSection');
+        if (infoSection) {
+            infoSection.style.display = 'block';
+        }
+    },
 
-        // Step 5: Compare with historical data
-        UI.updateLoadingStatus('Comparing with historical analyses...');
-        const comparison = HistoryManager.compareWithHistory(result);
-        result.historicalComparison = comparison;
+    updateThreatIntelStatus(stats) {
+        const statusElement = document.getElementById('threatIntelContent');
+        if (!statusElement) return;
 
-        // Save to history
-        const analysisId = HistoryManager.saveAnalysis(result, fileName, connections);
-        result.analysisId = analysisId;
+        const sources = stats.sources || {};
+        const threatfoxStatus = sources.threatfox || {};
+        const customRulesStatus = sources.customRules || {};
 
-        // Train ML on new data
-        if (HistoryManager.history.length > 10) {
-            MLDetector.trainOnHistory(HistoryManager.history);
+        let html = '<div class="intel-status">';
+
+        // ThreatFox
+        html += '<div class="intel-feed">';
+        html += '<div class="intel-feed-header">';
+        html += `<span class="status-dot ${threatfoxStatus.status === 'active' ? 'status-active' : 'status-inactive'}"></span>`;
+        html += '<span>ThreatFox API</span>';
+        html += '</div>';
+        html += '<div class="intel-feed-info">';
+        if (threatfoxStatus.status === 'active') {
+            html += `✓ Online - ${threatfoxStatus.iocs || 0} IOCs loaded`;
+        } else {
+            html += '⚠ Offline - Using local detection';
+        }
+        html += '</div></div>';
+
+        // Custom Rules
+        html += '<div class="intel-feed">';
+        html += '<div class="intel-feed-header">';
+        html += `<span class="status-dot status-active"></span>`;
+        html += '<span>Custom Rules</span>';
+        html += '</div>';
+        html += '<div class="intel-feed-info">';
+        html += `✓ Active - ${customRulesStatus.count || 0} rule(s)`;
+        html += '</div></div>';
+
+        // ML Status
+        html += '<div class="intel-feed">';
+        html += '<div class="intel-feed-header">';
+        html += `<span class="status-dot status-active"></span>`;
+        html += '<span>Machine Learning</span>';
+        html += '</div>';
+        html += '<div class="intel-feed-info">';
+        html += '✓ Enabled - Models ready';
+        html += '</div></div>';
+
+        html += '</div>';
+
+        // Warning if ThreatFox offline
+        if (threatfoxStatus.status !== 'active') {
+            html += `
+                <div style="margin-top: 1rem; padding: 1rem; background: rgba(234, 179, 8, 0.1); 
+                     border-left: 3px solid #eab308; border-radius: 0.5rem;">
+                    <p style="font-size: 0.875rem; color: #fef08a; margin: 0;">
+                        <strong>ℹ️ Note:</strong> ThreatFox API unavailable. Detection continues with behavioral analysis and ML models.
+                    </p>
+                </div>
+            `;
         }
 
-        currentAnalysis = result;
+        statusElement.innerHTML = html;
+    },
 
-        // Display results
-        UI.showResults(result);
-        
-    } catch (err) {
-        UI.hideLoading();
-        UI.showError(err.message);
-        document.getElementById('infoSection').classList.remove('hidden');
-    }
-}
+    // History viewing
+    viewHistory() {
+        if (!this.state.modules.historyManager || !this.state.modules.ui) {
+            this.showError('Error', 'History module not loaded');
+            return;
+        }
 
-// Analyze sample data
-function analyzeSample(type) {
-    const connections = Utils.generateSampleData(type);
-    const fileName = `Sample: ${type.charAt(0).toUpperCase() + type.slice(1).replace('-', ' ')}`;
-    analyzeConnections(connections, fileName);
-}
-
-// Download enhanced reports
-function downloadReport(format = 'json') {
-    if (!currentAnalysis || !currentConnections) {
-        console.warn('No analysis available to download');
-        return;
-    }
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-
-    if (format === 'json') {
-        const report = ReportGenerator.generateJSON(
-            currentAnalysis,
-            currentFileName,
-            currentConnections
-        );
-        Utils.downloadJSON(report, `c2-analysis-${timestamp}.json`);
-    } else if (format === 'html') {
-        ReportGenerator.downloadHTML(
-            currentAnalysis,
-            currentFileName,
-            currentConnections
-        );
-    } else if (format === 'pdf') {
-        ReportGenerator.printToPDF(
-            currentAnalysis,
-            currentFileName,
-            currentConnections
-        );
-    }
-}
-
-// Custom rule management
-function addCustomRule() {
-    const type = prompt('Rule type (ip/cidr):', 'ip');
-    const value = prompt('Value (e.g., 192.168.1.100 or 10.0.0.0/8):', '');
-    const malware = prompt('Malware family:', 'Custom C2');
-    const confidence = parseInt(prompt('Confidence (0-100):', '75'));
-    
-    if (value) {
-        const rule = ThreatIntel.addCustomRule({
-            type: type,
-            value: value,
-            malware: malware,
-            confidence: confidence,
-            threat_type: 'custom',
-            tags: ['custom']
+        const history = HistoryManager.getHistory();
+        UI.showHistoryModal(history, (analysis) => {
+            // Callback to load an analysis from history
+            this.loadFromHistory(analysis);
         });
+    },
+
+    loadFromHistory(analysis) {
+        this.state.currentAnalysis = analysis;
+        this.state.fileName = analysis.fileName || 'historical-analysis.json';
         
-        alert(`Rule added: ${rule.id}`);
-        updateCustomRulesUI();
-    }
-}
+        // We don't have original connections, so create minimal display
+        this.hideError();
+        this.hideLoading();
+        
+        // Show results without full connection data
+        this.showResults(analysis, []);
+    },
 
-function updateCustomRulesUI() {
-    const status = ThreatIntel.getStatus();
-    UI.updateThreatIntelStatus(status);
-}
-
-// History management
-function viewHistory() {
-    const history = HistoryManager.getHistory(20);
-    console.log('Recent analyses:', history);
-    
-    // Create modal or panel to display history
-    const modal = document.createElement('div');
-    modal.style.cssText = `
-        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-        background: white; padding: 2rem; border-radius: 0.5rem;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.3); max-width: 800px; max-height: 80vh;
-        overflow-y: auto; z-index: 1000;
-    `;
-    
-    modal.innerHTML = `
-        <h2 style="margin-bottom: 1rem;">Analysis History</h2>
-        <table style="width: 100%; border-collapse: collapse;">
-            <tr style="background: #f3f4f6;">
-                <th style="padding: 0.5rem; text-align: left;">Date</th>
-                <th style="padding: 0.5rem; text-align: left;">File</th>
-                <th style="padding: 0.5rem; text-align: left;">Score</th>
-                <th style="padding: 0.5rem; text-align: left;">Classification</th>
-            </tr>
-            ${history.map(h => `
-                <tr style="border-bottom: 1px solid #e5e7eb;">
-                    <td style="padding: 0.5rem;">${new Date(h.timestamp).toLocaleString()}</td>
-                    <td style="padding: 0.5rem;">${h.fileName}</td>
-                    <td style="padding: 0.5rem;"><strong>${h.summary.score}%</strong></td>
-                    <td style="padding: 0.5rem;">${h.summary.classification}</td>
-                </tr>
-            `).join('')}
-        </table>
-        <button onclick="this.parentElement.remove()" style="margin-top: 1rem; padding: 0.5rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 0.25rem; cursor: pointer;">
-            Close
-        </button>
-    `;
-    
-    document.body.appendChild(modal);
-}
-
-function exportHistory(format = 'json') {
-    const data = HistoryManager.exportHistory(format);
-    const blob = new Blob([data], { 
-        type: format === 'json' ? 'application/json' : 'text/csv' 
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `c2detector-history-${Date.now()}.${format}`;
-    a.click();
-    URL.revokeObjectURL(url);
-}
-
-// File upload handler
-document.getElementById('fileInput').addEventListener('change', async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    UI.hideError();
-
-    try {
-        const text = await file.text();
-        const connections = Utils.parseJSON(text);
-        analyzeConnections(connections, file.name);
-    } catch (err) {
-        UI.showError(`Failed to parse file: ${err.message}`);
-    }
-});
-
-// Drag and drop support
-const uploadZone = document.getElementById('uploadZone');
-
-uploadZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    uploadZone.style.borderColor = '#22d3ee';
-    uploadZone.style.background = 'rgba(34, 211, 238, 0.05)';
-});
-
-uploadZone.addEventListener('dragleave', (e) => {
-    e.preventDefault();
-    uploadZone.style.borderColor = '#475569';
-    uploadZone.style.background = '';
-});
-
-uploadZone.addEventListener('drop', async (e) => {
-    e.preventDefault();
-    uploadZone.style.borderColor = '#475569';
-    uploadZone.style.background = '';
-    
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
-    
-    if (!file.name.endsWith('.json')) {
-        UI.showError('Please upload a JSON file');
-        return;
-    }
-
-    UI.hideError();
-
-    try {
-        const text = await file.text();
-        const connections = Utils.parseJSON(text);
-        analyzeConnections(connections, file.name);
-    } catch (err) {
-        UI.showError(`Failed to parse file: ${err.message}`);
-    }
-});
-
-// Keyboard shortcuts
-document.addEventListener('keydown', (e) => {
-    // Ctrl/Cmd + H: View history
-    if ((e.ctrlKey || e.metaKey) && e.key === 'h') {
-        e.preventDefault();
-        viewHistory();
-    }
-    
-    // Ctrl/Cmd + E: Export current report
-    if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
-        e.preventDefault();
-        if (currentAnalysis) {
-            downloadReport('json');
+    // Report download
+    downloadReport(format) {
+        if (!this.state.currentAnalysis) {
+            this.showError('Error', 'No analysis available to export');
+            return;
         }
-    }
-});
 
-// Initialize on page load
-window.addEventListener('DOMContentLoaded', () => {
-    initializeApp();
-});
+        if (!this.state.modules.reportGenerator) {
+            this.showError('Error', 'Report generator not loaded');
+            return;
+        }
+
+        try {
+            switch (format) {
+                case 'json':
+                    ReportGenerator.downloadJSON(
+                        this.state.currentAnalysis,
+                        this.state.fileName || 'analysis.json'
+                    );
+                    break;
+                case 'html':
+                    ReportGenerator.downloadHTML(
+                        this.state.currentAnalysis,
+                        this.state.fileName || 'report.html'
+                    );
+                    break;
+                case 'pdf':
+                    ReportGenerator.printToPDF(this.state.currentAnalysis);
+                    break;
+                default:
+                    throw new Error('Unknown format: ' + format);
+            }
+            console.log(`✓ Report downloaded: ${format}`);
+        } catch (error) {
+            console.error('Download error:', error);
+            this.showError('Export Error', error.message);
+        }
+    },
+
+    // Utility methods
+    formatBytes(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+    }
+};
+
+// Global functions for HTML onclick handlers
+function analyzeSample(type) {
+    C2DetectorApp.analyzeSample(type);
+}
+
+function viewHistory() {
+    C2DetectorApp.viewHistory();
+}
+
+function downloadReport(format) {
+    C2DetectorApp.downloadReport(format);
+}
+
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => C2DetectorApp.initialize());
+} else {
+    C2DetectorApp.initialize();
+}
