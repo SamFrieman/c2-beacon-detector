@@ -1,81 +1,64 @@
-// Threat Intelligence Module v2.1 - FIXED
-const ThreatIntel = {
-    cache: {
-        threatfox: null,
-        alienvault: null,
-        localRules: null,
-        lastUpdate: null,
-        status: 'initializing' // Start as initializing
-    },
+// threat-intel.js - Fixed version with proper error handling
 
-    config: { 
+const ThreatIntel = {
+    config: {
         threatfoxAPI: 'https://threatfox-api.abuse.ch/api/v1/',
-        alienvaultAPI: 'https://otx.alienvault.com/api/v1/indicators',
-        cacheExpiry: 3600000,
+        cacheExpiry: 3600000, // 1 hour
         maxIPs: 20,
         enabledSources: {
             threatfox: true,
-            alienvault: false,
             customRules: true
         },
-        initTimeout: 5000 // Increased to 5 seconds
+        timeout: 10000, // 10 second timeout
+        retryAttempts: 2
     },
 
+    cache: new Map(),
     customRules: [],
+    stats: {
+        threatfoxIOCs: 0,
+        customRules: 0,
+        lastUpdate: null,
+        status: 'initializing',
+        error: null
+    },
 
     async initialize() {
-        console.log('Initializing threat intelligence...');
-        this.cache.status = 'initializing';
+        console.log('Initializing Threat Intelligence...');
         
-        try {
-            // Load custom rules first (always succeeds)
-            this.loadCustomRules();
-            
-            // Try to load ThreatFox with timeout
-            let threatFoxLoaded = false;
-            if (this.config.enabledSources.threatfox) {
-                try {
-                    threatFoxLoaded = await Promise.race([
-                        this.updateThreatFox(),
-                        new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error('ThreatFox timeout')), this.config.initTimeout)
-                        )
-                    ]);
-                } catch (err) {
-                    console.warn('ThreatFox unavailable:', err.message);
-                }
+        // Load custom rules from storage
+        this.loadCustomRules();
+        
+        // Try to initialize ThreatFox with error handling
+        if (this.config.enabledSources.threatfox) {
+            try {
+                await this.initializeThreatFox();
+            } catch (error) {
+                console.warn('ThreatFox initialization failed:', error);
+                this.stats.status = 'threatfox-offline';
+                this.stats.error = error.message;
+                // Continue anyway - custom rules can still work
             }
-            
-            // Set status based on what actually loaded
-            if (threatFoxLoaded || this.customRules.length > 0) {
-                this.cache.status = 'active';
-                console.log('✓ Threat intelligence initialized');
-            } else {
-                this.cache.status = 'offline';
-                console.warn('⚠ Threat intelligence running in offline mode');
-            }
-            
-            return true;
-            
-        } catch (err) {
-            console.error('Threat intel initialization error:', err);
-            this.cache.status = 'offline';
-            return false;
         }
+
+        this.stats.lastUpdate = new Date().toISOString();
+        console.log('✓ Threat Intel initialized:', this.stats);
+        return this.stats;
     },
 
-    async updateThreatFox() {
+    async initializeThreatFox() {
         try {
+            // Test API connectivity with timeout
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), this.config.initTimeout);
+            const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
             
             const response = await fetch(this.config.threatfoxAPI, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query: 'get_iocs', days: 7 }),
+                body: JSON.stringify({ query: 'get_iocs', days: 1 }),
                 signal: controller.signal
             });
-
+            
             clearTimeout(timeoutId);
 
             if (!response.ok) {
@@ -85,72 +68,80 @@ const ThreatIntel = {
             const data = await response.json();
             
             if (data.query_status === 'ok' && data.data) {
-                this.cache.threatfox = data.data;
-                this.cache.lastUpdate = Date.now();
+                this.stats.threatfoxIOCs = data.data.length;
+                this.stats.status = 'online';
                 console.log(`✓ ThreatFox: Loaded ${data.data.length} IOCs`);
-                return true;
-            }
-
-            return false;
-        } catch (err) {
-            if (err.name === 'AbortError') {
-                console.warn('ThreatFox request timed out');
             } else {
-                console.warn('ThreatFox update failed:', err.message);
+                throw new Error('Invalid ThreatFox response format');
             }
-            return false;
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                throw new Error('ThreatFox API timeout');
+            }
+            throw error;
         }
     },
 
-    async lookupIPMultiSource(ip) {
-        if (Utils.isPrivateIP(ip)) return null;
+    loadCustomRules() {
+        try {
+            const stored = localStorage.getItem('c2detector_custom_rules');
+            if (stored) {
+                this.customRules = JSON.parse(stored);
+                this.stats.customRules = this.customRules.length;
+                console.log(`✓ Loaded ${this.customRules.length} custom rules`);
+            }
+        } catch (error) {
+            console.error('Failed to load custom rules:', error);
+            this.customRules = [];
+        }
+    },
 
-        const results = {
-            ip: ip,
-            sources: [],
-            highestConfidence: 0,
-            combinedThreatScore: 0
-        };
+    saveCustomRules() {
+        try {
+            localStorage.setItem('c2detector_custom_rules', JSON.stringify(this.customRules));
+        } catch (error) {
+            console.error('Failed to save custom rules:', error);
+        }
+    },
 
-        // ThreatFox lookup (with timeout)
-        if (this.config.enabledSources.threatfox && this.cache.threatfox) {
+    async lookupIP(ip) {
+        console.log(`Looking up IP: ${ip}`);
+        const results = [];
+
+        // Check custom rules first (always works offline)
+        const customMatch = this.checkCustomRules(ip);
+        if (customMatch) {
+            results.push(customMatch);
+        }
+
+        // Check ThreatFox only if online
+        if (this.config.enabledSources.threatfox && this.stats.status === 'online') {
             try {
-                const tfResult = await Promise.race([
-                    this.lookupThreatFox(ip),
-                    new Promise((resolve) => setTimeout(() => resolve(null), 2000))
-                ]);
-                
-                if (tfResult) {
-                    results.sources.push({ source: 'ThreatFox', ...tfResult });
-                    results.highestConfidence = Math.max(results.highestConfidence, tfResult.confidence_level || 0);
+                const threatfoxMatch = await this.lookupThreatFox(ip);
+                if (threatfoxMatch) {
+                    results.push(threatfoxMatch);
                 }
-            } catch (err) {
-                console.warn('ThreatFox lookup failed for', ip, ':', err.message);
+            } catch (error) {
+                console.warn(`ThreatFox lookup failed for ${ip}:`, error);
+                // Don't fail the entire lookup if ThreatFox is down
             }
         }
 
-        // Custom rules check (always fast, no network)
-        if (this.config.enabledSources.customRules) {
-            const customResult = this.checkCustomRules(ip);
-            if (customResult) {
-                results.sources.push({ source: 'Custom Rules', ...customResult });
-                results.highestConfidence = Math.max(results.highestConfidence, customResult.confidence_level || 0);
-            }
-        }
-
-        if (results.sources.length > 0) {
-            results.combinedThreatScore = this.calculateCombinedScore(results.sources);
-            return results;
-        }
-
-        return null;
+        return results;
     },
 
     async lookupThreatFox(ip) {
+        // Check cache first
+        const cacheKey = `threatfox_${ip}`;
+        const cached = this.cache.get(cacheKey);
+        if (cached && (Date.now() - cached.timestamp < this.config.cacheExpiry)) {
+            return cached.data;
+        }
+
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 2000);
-            
+            const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
+
             const response = await fetch(this.config.threatfoxAPI, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -163,184 +154,119 @@ const ThreatIntel = {
 
             clearTimeout(timeoutId);
 
-            if (!response.ok) return null;
-            
-            const data = await response.json();
-            
-            if (data.query_status === 'ok' && data.data && data.data.length > 0) {
-                return this.processIOCData(data.data[0], ip);
+            if (!response.ok) {
+                throw new Error(`API returned ${response.status}`);
             }
 
+            const data = await response.json();
+
+            if (data.query_status === 'ok' && data.data && data.data.length > 0) {
+                const ioc = data.data[0];
+                const result = {
+                    source: 'ThreatFox',
+                    ip: ip,
+                    malware: ioc.malware_printable || 'Unknown',
+                    confidence: ioc.confidence_level || 50,
+                    threat_type: ioc.threat_type || 'unknown',
+                    tags: ioc.tags || [],
+                    first_seen: ioc.first_seen,
+                    reference: ioc.reference || null
+                };
+
+                // Cache the result
+                this.cache.set(cacheKey, {
+                    data: result,
+                    timestamp: Date.now()
+                });
+
+                return result;
+            }
+
+            // Cache negative result to avoid repeated lookups
+            this.cache.set(cacheKey, {
+                data: null,
+                timestamp: Date.now()
+            });
+
             return null;
-        } catch (err) {
-            if (err.name === 'AbortError') {
-                console.warn('ThreatFox lookup timed out for', ip);
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                console.warn(`ThreatFox lookup timeout for ${ip}`);
+            } else {
+                console.warn(`ThreatFox lookup error for ${ip}:`, error);
             }
             return null;
         }
-    },
-
-    processIOCData(ioc, ip) {
-        return {
-            ip: ip,
-            ioc_type: ioc.ioc_type,
-            threat_type: ioc.threat_type,
-            malware: ioc.malware || 'Unknown',
-            malware_alias: ioc.malware_alias || null,
-            confidence_level: ioc.confidence_level || 50,
-            first_seen: ioc.first_seen,
-            last_seen: ioc.last_seen || ioc.first_seen,
-            tags: ioc.tags || [],
-            reference: ioc.reference || null,
-            reporter: ioc.reporter || 'abuse.ch'
-        };
     },
 
     checkCustomRules(ip) {
         for (const rule of this.customRules) {
             if (rule.type === 'ip' && rule.value === ip) {
                 return {
+                    source: 'Custom Rules',
                     ip: ip,
-                    threat_type: rule.threat_type || 'custom',
                     malware: rule.malware || 'Custom Detection',
-                    confidence_level: rule.confidence || 75,
-                    first_seen: rule.created || new Date().toISOString(),
-                    tags: rule.tags || ['custom'],
-                    description: rule.description || 'Custom rule match'
+                    confidence: rule.confidence || 70,
+                    threat_type: rule.threat_type || 'custom',
+                    tags: rule.tags || [],
+                    description: rule.description
                 };
-            }
-            
-            if (rule.type === 'cidr' && this.ipInCIDR(ip, rule.value)) {
+            } else if (rule.type === 'cidr' && this.matchCIDR(ip, rule.value)) {
                 return {
+                    source: 'Custom Rules',
                     ip: ip,
-                    threat_type: rule.threat_type || 'custom',
                     malware: rule.malware || 'Custom Detection',
-                    confidence_level: rule.confidence || 70,
-                    first_seen: rule.created || new Date().toISOString(),
-                    tags: rule.tags || ['custom', 'cidr'],
-                    description: rule.description || `Matched CIDR range ${rule.value}`
+                    confidence: rule.confidence || 70,
+                    threat_type: rule.threat_type || 'custom',
+                    tags: rule.tags || [],
+                    description: rule.description,
+                    cidr: rule.value
                 };
             }
         }
         return null;
     },
 
-    ipInCIDR(ip, cidr) {
-        try {
-            const [range, bits] = cidr.split('/');
-            const mask = ~(2 ** (32 - parseInt(bits)) - 1);
-            
-            const ipNum = this.ipToNumber(ip);
-            const rangeNum = this.ipToNumber(range);
-            
-            return (ipNum & mask) === (rangeNum & mask);
-        } catch (err) {
-            console.warn('CIDR matching error:', err);
-            return false;
-        }
-    },
-
-    ipToNumber(ip) {
-        return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet), 0) >>> 0;
-    },
-
-    calculateCombinedScore(sources) {
-        if (sources.length === 0) return 0;
+    matchCIDR(ip, cidr) {
+        const [range, bits] = cidr.split('/');
+        const mask = -1 << (32 - parseInt(bits));
         
-        const weights = {
-            'ThreatFox': 1.0,
-            'AlienVault OTX': 0.9,
-            'Custom Rules': 0.85
+        const ip2long = (ip) => {
+            return ip.split('.').reduce((int, oct) => (int << 8) + parseInt(oct), 0) >>> 0;
         };
-
-        let totalScore = 0;
-        let totalWeight = 0;
-
-        sources.forEach(src => {
-            const weight = weights[src.source] || 0.5;
-            const confidence = src.confidence_level || 50;
-            totalScore += confidence * weight;
-            totalWeight += weight;
-        });
-
-        if (sources.length > 1) {
-            totalScore *= 1.2;
-        }
-
-        return Math.min(100, Math.round(totalScore / totalWeight));
+        
+        return (ip2long(ip) & mask) === (ip2long(range) & mask);
     },
 
-    async checkConnections(connections) {
-        const ips = Utils.extractUniqueIPs(connections);
-        const publicDestIPs = ips.destIPs.filter(ip => !Utils.isPrivateIP(ip));
-        const ipsToCheck = publicDestIPs.slice(0, this.config.maxIPs);
-        
-        const matches = [];
-        
-        for (const ip of ipsToCheck) {
-            try {
-                const result = await this.lookupIPMultiSource(ip);
-                if (result && result.sources.length > 0) {
-                    const connCount = connections.filter(c => Utils.getDestIP(c) === ip).length;
-                    result.connection_count = connCount;
-                    matches.push(result);
-                }
-                
-                await new Promise(resolve => setTimeout(resolve, 300));
-            } catch (err) {
-                console.warn('Error checking IP', ip, ':', err.message);
-            }
-        }
-
-        return matches;
-    },
-
-    // Custom Rules Management
     addCustomRule(rule) {
-        const newRule = {
-            id: Date.now(),
-            created: new Date().toISOString(),
-            enabled: true,
-            ...rule
-        };
-        
-        this.customRules.push(newRule);
+        // Validate rule
+        if (!rule.type || !rule.value) {
+            throw new Error('Rule must have type and value');
+        }
+
+        // Add default values
+        rule.id = Date.now().toString();
+        rule.created = new Date().toISOString();
+        rule.confidence = rule.confidence || 70;
+        rule.tags = rule.tags || [];
+
+        this.customRules.push(rule);
         this.saveCustomRules();
-        return newRule;
+        this.stats.customRules = this.customRules.length;
+        
+        console.log('Added custom rule:', rule);
+        return rule;
     },
 
     removeCustomRule(ruleId) {
-        this.customRules = this.customRules.filter(r => r.id !== ruleId);
-        this.saveCustomRules();
-    },
-
-    updateCustomRule(ruleId, updates) {
-        const rule = this.customRules.find(r => r.id === ruleId);
-        if (rule) {
-            Object.assign(rule, updates);
+        const index = this.customRules.findIndex(r => r.id === ruleId);
+        if (index !== -1) {
+            this.customRules.splice(index, 1);
             this.saveCustomRules();
+            this.stats.customRules = this.customRules.length;
+            return true;
         }
-    },
-
-    loadCustomRules() {
-        try {
-            const saved = localStorage.getItem('c2detector_custom_rules');
-            if (saved) {
-                this.customRules = JSON.parse(saved);
-                console.log(`✓ Loaded ${this.customRules.length} custom rules`);
-            }
-        } catch (err) {
-            console.warn('Failed to load custom rules:', err);
-            this.customRules = [];
-        }
-    },
-
-    saveCustomRules() {
-        try {
-            localStorage.setItem('c2detector_custom_rules', JSON.stringify(this.customRules));
-        } catch (err) {
-            console.error('Failed to save custom rules:', err);
-        }
+        return false;
     },
 
     exportRules() {
@@ -353,68 +279,36 @@ const ThreatIntel = {
             if (Array.isArray(rules)) {
                 this.customRules = rules;
                 this.saveCustomRules();
+                this.stats.customRules = this.customRules.length;
                 return true;
             }
-        } catch (err) {
-            console.error('Failed to import rules:', err);
+            throw new Error('Invalid rules format');
+        } catch (error) {
+            console.error('Failed to import rules:', error);
+            return false;
         }
-        return false;
     },
 
-    getStatus() {
+    getStats() {
         return {
-            active: this.cache.status === 'active',
-            iocCount: this.cache.threatfox ? this.cache.threatfox.length : 0,
-            customRuleCount: this.customRules.length,
-            lastUpdate: this.cache.lastUpdate,
-            status: this.cache.status, // Add explicit status field
-            sources: Object.entries(this.config.enabledSources)
-                .filter(([_, enabled]) => enabled)
-                .map(([source]) => source)
-        };
-    },
-
-    getMalwareFamilyInfo(malware) {
-        const families = {
-            'cobalt strike': {
-                framework: 'Cobalt Strike',
-                description: 'Commercial adversary simulation toolkit',
-                typical_interval: '60s',
-                typical_ports: [80, 443, 8080]
-            },
-            'meterpreter': {
-                framework: 'Metasploit Framework',
-                description: 'Post-exploitation payload',
-                typical_interval: '60-120s',
-                typical_ports: [443, 4444]
-            },
-            'empire': {
-                framework: 'PowerShell Empire',
-                description: 'Post-exploitation framework',
-                typical_interval: '5-30s',
-                typical_ports: [80, 443]
-            },
-            'sliver': {
-                framework: 'Sliver',
-                description: 'Open-source C2 framework',
-                typical_interval: '60s',
-                typical_ports: [443, 8443]
-            },
-            'covenant': {
-                framework: 'Covenant',
-                description: '.NET C2 framework',
-                typical_interval: '60s',
-                typical_ports: [80, 443, 7443]
+            ...this.stats,
+            sources: {
+                threatfox: {
+                    enabled: this.config.enabledSources.threatfox,
+                    status: this.stats.status === 'online' ? 'active' : 'offline',
+                    iocs: this.stats.threatfoxIOCs
+                },
+                customRules: {
+                    enabled: this.config.enabledSources.customRules,
+                    status: 'active',
+                    count: this.stats.customRules
+                }
             }
         };
-
-        const key = malware.toLowerCase();
-        for (const [family, info] of Object.entries(families)) {
-            if (key.includes(family)) {
-                return info;
-            }
-        }
-
-        return null;
     }
 };
+
+// Export for use in other modules
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = ThreatIntel;
+}
