@@ -1,215 +1,371 @@
-// Detection Engine Module
+// detector.js - Detection & Scoring Engine
+// Version 2.1.1
+
 const Detector = {
-    detect(features, threatIntelMatches) {
-        let score = 0;
-        const reasons = [];
-        const technicalDetails = [];
+    async analyze(features, connections) {
+        console.log('Running detection analysis...');
 
-        // THREAT INTELLIGENCE MATCHES - Highest priority
-        if (threatIntelMatches && threatIntelMatches.length > 0) {
-            const highestConfidence = Math.max(...threatIntelMatches.map(m => m.confidence_level));
-            
-            score += 45; // Base score for any threat intel match
-            
-            if (highestConfidence >= 75) {
-                score += 25;
-                reasons.push(`🔴 CRITICAL: Matched ${threatIntelMatches.length} known malicious IOC(s) - HIGH CONFIDENCE`);
-            } else {
-                score += 15;
-                reasons.push(`🟡 HIGH: Matched ${threatIntelMatches.length} known malicious IOC(s)`);
+        const result = {
+            score: 0,
+            classification: 'BENIGN',
+            severity: 'info',
+            detectionFactors: [],
+            features: features,
+            threatIntel: null,
+            mlPrediction: null,
+            recommendation: ''
+        };
+
+        // 1. Threat Intelligence Lookup
+        if (typeof ThreatIntel !== 'undefined') {
+            result.threatIntel = await this.checkThreatIntel(connections);
+            if (result.threatIntel.matches.length > 0) {
+                const tiScore = this.scoreThreatIntel(result.threatIntel);
+                result.score += tiScore;
+                result.detectionFactors.push({
+                    factor: 'Threat Intelligence Match',
+                    points: tiScore,
+                    details: `${result.threatIntel.matches.length} IOC(s) matched`
+                });
             }
+        }
 
-            threatIntelMatches.forEach(match => {
-                reasons.push(`   • ${match.malware} (${match.threat_type}) - ${match.connection_count} connections`);
-                technicalDetails.push(`IOC: ${match.ip} | Malware: ${match.malware} | First seen: ${match.first_seen}`);
+        // 2. Machine Learning Prediction
+        if (typeof MLDetector !== 'undefined' && MLDetector.config.enabled) {
+            result.mlPrediction = MLDetector.predict(features);
+            if (result.mlPrediction.enabled) {
+                const mlScore = this.scoreMLPrediction(result.mlPrediction);
+                result.score += mlScore;
+                if (mlScore > 0) {
+                    result.detectionFactors.push({
+                        factor: 'Machine Learning Detection',
+                        points: mlScore,
+                        details: `Prediction: ${result.mlPrediction.ensemble.prediction}`
+                    });
+                }
+            }
+        }
+
+        // 3. Behavioral Scoring
+        const behavioralScore = this.scoreBehavioral(features);
+        result.score += behavioralScore.total;
+        result.detectionFactors.push(...behavioralScore.factors);
+
+        // 4. Apply benign indicators (negative scoring)
+        const benignScore = this.scoreBenignIndicators(features);
+        if (benignScore < 0) {
+            result.score += benignScore;
+            result.detectionFactors.push({
+                factor: 'Benign Indicators',
+                points: benignScore,
+                details: 'Traffic shows characteristics of normal behavior'
             });
         }
 
-        // PERIODICITY ANALYSIS
-        if (features.periodicity > 0.80) {
-            score += 35;
-            reasons.push(`🔴 CRITICAL: Extreme periodicity (${(features.periodicity * 100).toFixed(1)}%)`);
-            technicalDetails.push(`Periodicity: ${features.periodicity.toFixed(3)} (threshold: >0.80)`);
-        } else if (features.periodicity > 0.70) {
-            score += 25;
-            reasons.push(`🟡 HIGH: Strong periodicity (${(features.periodicity * 100).toFixed(1)}%)`);
-        } else if (features.periodicity > 0.60) {
-            score += 15;
-            reasons.push(`⚠️ MODERATE: Notable periodicity (${(features.periodicity * 100).toFixed(1)}%)`);
+        // Ensure score is within bounds
+        result.score = Math.max(0, Math.min(100, result.score));
+
+        // Classify based on score
+        result.classification = this.classify(result.score);
+        result.severity = this.getSeverity(result.score);
+        result.recommendation = this.getRecommendation(result.score, result.classification);
+
+        console.log(`Detection complete: ${result.classification} (${result.score})`);
+        return result;
+    },
+
+    async checkThreatIntel(connections) {
+        const matches = [];
+        const checkedIPs = new Set();
+
+        // Extract unique IPs
+        if (typeof Utils !== 'undefined') {
+            const ips = Utils.extractUniqueIPs(connections);
+            
+            // Limit number of lookups
+            const ipsToCheck = ips.slice(0, ThreatIntel.config.maxIPs);
+
+            for (const ip of ipsToCheck) {
+                if (!checkedIPs.has(ip)) {
+                    checkedIPs.add(ip);
+                    const results = await ThreatIntel.lookupIP(ip);
+                    if (results && results.length > 0) {
+                        matches.push(...results);
+                    }
+                }
+            }
         }
-
-        // JITTER ANALYSIS
-        if (features.jitter < 0.08) {
-            score += 30;
-            reasons.push(`🔴 CRITICAL: Extremely low jitter (${(features.jitter * 100).toFixed(2)}%)`);
-            technicalDetails.push(`Jitter (CV): ${features.jitter.toFixed(4)} (threshold: <0.08)`);
-        } else if (features.jitter < 0.15) {
-            score += 20;
-            reasons.push(`🟡 HIGH: Low jitter (${(features.jitter * 100).toFixed(2)}%)`);
-        } else if (features.jitter < 0.25) {
-            score += 10;
-            reasons.push(`⚠️ MODERATE: Consistent timing (${(features.jitter * 100).toFixed(2)}%)`);
-        }
-
-        // PAYLOAD CONSISTENCY
-        if (features.bytes_consistency > 0.90) {
-            score += 20;
-            reasons.push(`🔴 Very consistent payload sizes (${(features.bytes_consistency * 100).toFixed(1)}%)`);
-            technicalDetails.push(`Bytes CV: ${features.bytes_cv.toFixed(4)} | Avg: ${Utils.formatBytes(features.avg_bytes)}`);
-        } else if (features.bytes_consistency > 0.80) {
-            score += 15;
-            reasons.push(`🟡 Consistent payloads (${(features.bytes_consistency * 100).toFixed(1)}%)`);
-        }
-
-        // INTERVAL RANGE ANALYSIS
-        const interval = features.mean_interval;
-        if (interval >= 30 && interval <= 300) {
-            score += 15;
-            reasons.push(`⚠️ Interval (${interval.toFixed(1)}s) in common C2 range (30-300s)`);
-        }
-
-        // SPECIFIC C2 SIGNATURES
-        if (interval >= 58 && interval <= 62 && features.jitter < 0.10) {
-            score += 20;
-            reasons.push(`🔴 CRITICAL: 60s beacon - COBALT STRIKE signature`);
-        }
-
-        if (interval >= 115 && interval <= 125 && features.jitter < 0.12) {
-            score += 18;
-            reasons.push(`🔴 HIGH: 120s beacon - METASPLOIT signature`);
-        }
-
-        // DURATION AND PERSISTENCE
-        if (features.duration_minutes > 120 && features.connection_count > 50) {
-            score += 15;
-            reasons.push(`🔴 Sustained beaconing: ${Utils.formatDuration(features.duration_minutes)}`);
-        } else if (features.duration_minutes > 60 && features.connection_count > 30) {
-            score += 12;
-            reasons.push(`🟡 Extended pattern: ${Utils.formatDuration(features.duration_minutes)}`);
-        }
-
-        // NETWORK PATTERNS
-        if (features.unique_dest_ips === 1 && features.connection_count > 20) {
-            score += 12;
-            reasons.push(`⚠️ Single destination IP with ${features.connection_count} connections`);
-        }
-
-        if (features.port_entropy < 0.5 && features.unique_dest_ports === 1) {
-            score += 10;
-            reasons.push(`⚠️ Single destination port (low port diversity)`);
-            technicalDetails.push(`Port entropy: ${features.port_entropy.toFixed(3)}`);
-        }
-
-        // ENTROPY ANALYSIS
-        if (features.entropy < 1.5 && features.connection_count > 20) {
-            score += 12;
-            reasons.push(`🟡 Low entropy (${features.entropy.toFixed(2)}) suggests automated pattern`);
-        }
-
-        // TIME PATTERNS
-        if (features.night_ratio > 0.7 && features.connection_count > 30) {
-            score += 8;
-            reasons.push(`⚠️ High ratio of night activity (${(features.night_ratio * 100).toFixed(0)}%)`);
-        }
-
-        // BENIGN INDICATORS (reduce score)
-        if (interval < 3) {
-            score -= 25;
-            reasons.push(`✓ Very short intervals suggest legitimate traffic`);
-        } else if (features.cv_interval > 0.70) {
-            score -= 20;
-            reasons.push(`✓ High variability suggests organic behavior`);
-        }
-
-        if (features.unique_dest_ips > 10) {
-            score -= 15;
-            reasons.push(`✓ Multiple destinations (${features.unique_dest_ips})`);
-        }
-
-        if (features.time_diversity > 0.7) {
-            score -= 10;
-            reasons.push(`✓ Activity spread across day (${(features.time_diversity * 100).toFixed(0)}% hour coverage)`);
-        }
-
-        // Calculate final score
-        const finalScore = Math.max(0, Math.min(100, score));
-
-        // Determine classification
-        let classification, severity, recommendation;
-        if (finalScore >= 80) {
-            classification = 'CRITICAL';
-            severity = 'critical';
-            recommendation = '🚨 IMMEDIATE ACTION: High confidence C2 detected. Isolate host, capture memory/disk, escalate to IR team immediately.';
-        } else if (finalScore >= 65) {
-            classification = 'SUSPICIOUS';
-            severity = 'high';
-            recommendation = '⚠️ INVESTIGATE IMMEDIATELY: Strong C2 indicators. Correlate with SIEM/EDR logs, check process tree, inspect network traffic.';
-        } else if (finalScore >= 45) {
-            classification = 'MONITOR';
-            severity = 'medium';
-            recommendation = '👁️ ENHANCED MONITORING: Moderate indicators. Continue observation, correlate with threat intel, review endpoint telemetry.';
-        } else {
-            classification = 'BENIGN';
-            severity = 'info';
-            recommendation = '✓ APPEARS BENIGN: Patterns consistent with legitimate traffic. Continue normal monitoring.';
-        }
-
-        // Get framework identification
-        const frameworks = Analyzer.identifyFramework(features, threatIntelMatches);
-        
-        // Get MITRE ATT&CK mapping
-        const mitreTechniques = Analyzer.getMITREMapping(features);
 
         return {
-            score: finalScore,
-            classification,
-            severity,
-            recommendation,
-            reasons,
-            technicalDetails,
-            features,
-            identifiedFrameworks: frameworks,
-            mitreTechniques: mitreTechniques,
-            threatIntelMatches: threatIntelMatches || [],
-            timestamp: new Date().toISOString()
+            checked: checkedIPs.size,
+            matches: matches
         };
     },
 
-    generateReport(result, fileName, connections) {
-        const ips = Utils.extractUniqueIPs(connections);
+    scoreThreatIntel(threatIntel) {
+        if (!threatIntel.matches || threatIntel.matches.length === 0) {
+            return 0;
+        }
+
+        let score = 0;
+
+        threatIntel.matches.forEach(match => {
+            // Base score from match
+            score += 30;
+
+            // Bonus for high confidence
+            if (match.confidence >= 80) {
+                score += 20;
+            } else if (match.confidence >= 60) {
+                score += 10;
+            }
+
+            // Bonus for known malware family
+            if (match.malware && match.malware !== 'Unknown') {
+                score += 10;
+            }
+
+            // Bonus for multiple sources
+            if (match.source === 'ThreatFox') {
+                score += 10;
+            }
+        });
+
+        // Cap at 70 points
+        return Math.min(70, score);
+    },
+
+    scoreMLPrediction(mlPrediction) {
+        if (!mlPrediction.enabled || !mlPrediction.ensemble) {
+            return 0;
+        }
+
+        const ensemble = mlPrediction.ensemble;
         
-        return {
-            metadata: {
-                tool: 'C2 Beacon Detector',
-                version: '2.0.0',
-                timestamp: result.timestamp,
-                analyzed_file: fileName,
-                threat_intel_enabled: result.threatIntelMatches.length > 0
-            },
-            summary: {
-                score: result.score,
-                classification: result.classification,
-                severity: result.severity,
-                recommendation: result.recommendation
-            },
-            threat_intelligence: {
-                matches: result.threatIntelMatches,
-                total_iocs_matched: result.threatIntelMatches.length
-            },
-            behavioral_analysis: {
-                frameworks: result.identifiedFrameworks,
-                mitre_techniques: result.mitreTechniques,
-                detection_factors: result.reasons,
-                technical_details: result.technicalDetails
-            },
-            network_data: {
-                total_connections: connections.length,
-                unique_dest_ips: ips.destIPs,
-                unique_src_ips: ips.srcIPs,
-                duration: Utils.formatDuration(result.features.duration_minutes),
-                total_bytes: Utils.formatBytes(result.features.total_bytes)
-            },
-            features: result.features
+        if (ensemble.prediction === 'malicious') {
+            // Base score
+            let score = 20;
+
+            // Add based on confidence
+            if (ensemble.confidence === 'high') {
+                score += 15;
+            } else if (ensemble.confidence === 'medium') {
+                score += 10;
+            } else {
+                score += 5;
+            }
+
+            return score;
+        }
+
+        return 0;
+    },
+
+    scoreBehavioral(features) {
+        const factors = [];
+        let total = 0;
+
+        // Periodicity scoring
+        if (features.periodicity > 0.80) {
+            const points = 35;
+            total += points;
+            factors.push({
+                factor: 'Extreme Periodicity',
+                points: points,
+                details: `${(features.periodicity * 100).toFixed(1)}% - Highly regular timing`
+            });
+        } else if (features.periodicity > 0.70) {
+            const points = 25;
+            total += points;
+            factors.push({
+                factor: 'High Periodicity',
+                points: points,
+                details: `${(features.periodicity * 100).toFixed(1)}% - Regular intervals`
+            });
+        } else if (features.periodicity > 0.60) {
+            const points = 15;
+            total += points;
+            factors.push({
+                factor: 'Moderate Periodicity',
+                points: points,
+                details: `${(features.periodicity * 100).toFixed(1)}%`
+            });
+        }
+
+        // Jitter scoring
+        if (features.jitter < 0.08) {
+            const points = 30;
+            total += points;
+            factors.push({
+                factor: 'Extremely Low Jitter',
+                points: points,
+                details: `${(features.jitter * 100).toFixed(1)}% - Consistent timing`
+            });
+        } else if (features.jitter < 0.15) {
+            const points = 20;
+            total += points;
+            factors.push({
+                factor: 'Low Jitter',
+                points: points,
+                details: `${(features.jitter * 100).toFixed(1)}%`
+            });
+        } else if (features.jitter < 0.25) {
+            const points = 10;
+            total += points;
+            factors.push({
+                factor: 'Consistent Timing',
+                points: points,
+                details: `${(features.jitter * 100).toFixed(1)}% jitter`
+            });
+        }
+
+        // Payload consistency
+        if (features.payloadConsistency > 0.90) {
+            const points = 20;
+            total += points;
+            factors.push({
+                factor: 'Very Consistent Payloads',
+                points: points,
+                details: `${(features.payloadConsistency * 100).toFixed(1)}% similarity`
+            });
+        } else if (features.payloadConsistency > 0.80) {
+            const points = 15;
+            total += points;
+            factors.push({
+                factor: 'Consistent Payloads',
+                points: points,
+                details: `${(features.payloadConsistency * 100).toFixed(1)}% similarity`
+            });
+        }
+
+        // Known beacon signatures
+        if (features.frameworkSignatures && features.frameworkSignatures.length > 0) {
+            const sig = features.frameworkSignatures[0];
+            const points = sig.confidence === 'high' ? 20 : sig.confidence === 'medium' ? 15 : 10;
+            total += points;
+            factors.push({
+                factor: `${sig.framework} Signature`,
+                points: points,
+                details: sig.reason
+            });
+        }
+
+        // Persistence
+        if (features.durationHours > 2) {
+            const points = 15;
+            total += points;
+            factors.push({
+                factor: 'Sustained Activity',
+                points: points,
+                details: `${features.durationHours.toFixed(1)} hours of activity`
+            });
+        } else if (features.durationHours > 1) {
+            const points = 10;
+            total += points;
+            factors.push({
+                factor: 'Extended Activity',
+                points: points,
+                details: `${features.durationHours.toFixed(1)} hours`
+            });
+        }
+
+        // Network patterns
+        if (features.uniqueDestinations === 1) {
+            const points = 12;
+            total += points;
+            factors.push({
+                factor: 'Single Destination',
+                points: points,
+                details: 'All connections to one IP'
+            });
+        }
+
+        if (features.portDiversity < 0.15) {
+            const points = 10;
+            total += points;
+            factors.push({
+                factor: 'Low Port Diversity',
+                points: points,
+                details: 'Consistent port usage'
+            });
+        }
+
+        // Low entropy
+        if (features.timingEntropy < 2.5) {
+            const points = 10;
+            total += points;
+            factors.push({
+                factor: 'Low Timing Entropy',
+                points: points,
+                details: 'Predictable timing pattern'
+            });
+        }
+
+        return { total, factors };
+    },
+
+    scoreBenignIndicators(features) {
+        let penalty = 0;
+
+        // High jitter (inconsistent timing)
+        if (features.jitter > 0.60) {
+            penalty -= 15;
+        } else if (features.jitter > 0.45) {
+            penalty -= 10;
+        }
+
+        // Multiple destinations
+        if (features.uniqueDestinations > 5) {
+            penalty -= 15;
+        } else if (features.uniqueDestinations > 3) {
+            penalty -= 10;
+        }
+
+        // Very short intervals (< 5s) - might be normal web browsing
+        if (features.meanInterval < 5000) {
+            penalty -= 10;
+        }
+
+        // High time diversity
+        if (features.timingEntropy > 4.0) {
+            penalty -= 10;
+        }
+
+        // Very high port diversity
+        if (features.portDiversity > 0.7) {
+            penalty -= 10;
+        }
+
+        return penalty;
+    },
+
+    classify(score) {
+        if (score >= 80) return 'CRITICAL';
+        if (score >= 65) return 'SUSPICIOUS';
+        if (score >= 45) return 'MONITOR';
+        return 'BENIGN';
+    },
+
+    getSeverity(score) {
+        if (score >= 80) return 'critical';
+        if (score >= 65) return 'high';
+        if (score >= 45) return 'medium';
+        return 'info';
+    },
+
+    getRecommendation(score, classification) {
+        const recommendations = {
+            'CRITICAL': '🚨 IMMEDIATE ACTION REQUIRED: This traffic shows strong indicators of C2 beaconing. Recommend immediate isolation of the host, full incident response procedures, and forensic analysis.',
+            'SUSPICIOUS': '⚠️ URGENT INVESTIGATION NEEDED: Multiple indicators suggest potential C2 activity. Recommend enhanced monitoring, packet capture, and investigation by security team.',
+            'MONITOR': '👁️ ENHANCED MONITORING RECOMMENDED: Some suspicious patterns detected. Consider increased logging and continued observation to determine if this is malicious or benign.',
+            'BENIGN': '✅ APPEARS BENIGN: Traffic patterns are consistent with normal network activity. No immediate action required, but continue standard monitoring.'
         };
+
+        return recommendations[classification] || 'No recommendation available.';
     }
 };
+
+// Export for use in other modules
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = Detector;
+}
