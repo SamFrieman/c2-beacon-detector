@@ -5,27 +5,28 @@ let currentConnections = null;
 
 // Initialize the application
 async function initializeApp() {
-    console.log('Initializing C2 Beacon Detector v2.1...');
-    
-    // Initialize all modules
-    const initPromises = [
-        ThreatIntel.initialize(),
-        MLDetector.initialize()
-    ];
-    
-    await Promise.all(initPromises);
-    
-    // Initialize history manager
-    HistoryManager.initialize();
-    
-    // Update UI with status
-    const status = ThreatIntel.getStatus();
-    UI.updateThreatIntelStatus(status);
-    
-    console.log('✓ All systems initialized');
-    console.log(`  - Threat Intel: ${status.sources.length} source(s) active`);
-    console.log(`  - ML Models: ${MLDetector.config.enabled ? 'Enabled' : 'Disabled'}`);
-    console.log(`  - History: ${HistoryManager.history.length} record(s)`);
+    try {
+        // Initialize threat intelligence
+        const stats = await ThreatIntel.initialize();
+        updateThreatIntelStatus(stats);
+
+        // Initialize ML if available
+        if (typeof MLDetector !== 'undefined' && MLDetector.initialize) {
+            await MLDetector.initialize();
+        }
+
+        console.log('✓ All systems initialized');
+    } catch (error) {
+        console.error('Initialization error:', error);
+        
+        // Show error but allow degraded operation
+        document.getElementById('threatIntelContent').innerHTML = `
+            <div style="color: #f87171;">
+                <p>⚠️ Initialization encountered errors, but the tool can still operate with reduced capabilities.</p>
+                <p style="font-size: 0.875rem; margin-top: 0.5rem; color: #fca5a5;">Error: ${error.message}</p>
+            </div>
+        `;
+    }
 }
 
 // Enhanced analysis with all v2.1 features
