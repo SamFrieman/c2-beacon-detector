@@ -1,246 +1,346 @@
-// Behavioral Analysis Module
+// analyzer.js - Behavioral Analysis Engine
+// Version 2.1.1
+
 const Analyzer = {
     extractFeatures(connections) {
-        const timestamps = connections.map(c => Utils.getTimestamp(c)).sort((a, b) => a - b);
-        const intervals = timestamps.slice(1).map((t, i) => t - timestamps[i]);
+        console.log(`Extracting features from ${connections.length} connections...`);
 
-        const timingStats = Utils.calculateStats(intervals);
-        const cv = timingStats.mean > 0 ? timingStats.std / timingStats.mean : 0;
+        const features = {};
 
-        const periodicity = this.calculatePeriodicity(intervals, timingStats.median);
-        const entropy = this.calculateEntropy(intervals);
+        // Basic stats
+        features.connectionCount = connections.length;
+        features.uniqueDestinations = this.countUniqueDestinations(connections);
+        features.uniqueSources = this.countUniqueSources(connections);
 
-        const byteSizes = connections.map(c => Utils.getBytes(c)).filter(b => b > 0);
-        const byteStats = Utils.calculateStats(byteSizes);
-        const bytesCV = byteSizes.length > 0 && byteStats.mean > 0 ? byteStats.std / byteStats.mean : 1;
+        // Timing analysis
+        const timingFeatures = this.analyzeTimingPatterns(connections);
+        Object.assign(features, timingFeatures);
 
-        const destIPs = [...new Set(connections.map(c => Utils.getDestIP(c)))];
-        const destPorts = [...new Set(connections.map(c => Utils.getDestPort(c)).filter(p => p > 0))];
-        const srcPorts = [...new Set(connections.map(c => Utils.getSrcPort(c)).filter(p => p > 0))];
+        // Payload analysis
+        const payloadFeatures = this.analyzePayloads(connections);
+        Object.assign(features, payloadFeatures);
 
-        const durationMs = timestamps[timestamps.length - 1] - timestamps[0];
+        // Network analysis
+        const networkFeatures = this.analyzeNetwork(connections);
+        Object.assign(features, networkFeatures);
 
-        // Calculate port patterns
-        const portEntropy = this.calculatePortEntropy(connections);
+        // Duration analysis
+        const durationFeatures = this.analyzeDuration(connections);
+        Object.assign(features, durationFeatures);
+
+        // Framework signatures
+        features.frameworkSignatures = this.detectFrameworks(features, connections);
+
+        // MITRE ATT&CK mapping
+        features.mitreAttack = this.mapMITRE(features);
+
+        console.log(`✓ Extracted ${Object.keys(features).length} features`);
+        return features;
+    },
+
+    countUniqueDestinations(connections) {
+        const dests = new Set();
+        connections.forEach(conn => {
+            if (conn.dest_ip) dests.add(conn.dest_ip);
+        });
+        return dests.size;
+    },
+
+    countUniqueSources(connections) {
+        const srcs = new Set();
+        connections.forEach(conn => {
+            if (conn.src_ip) srcs.add(conn.src_ip);
+        });
+        return srcs.size;
+    },
+
+    analyzeTimingPatterns(connections) {
+        if (!Utils) return {};
+
+        // Sort by timestamp
+        const sorted = [...connections].sort((a, b) => a.timestamp - b.timestamp);
         
-        // Time of day analysis
-        const timePatterns = this.analyzeTimePatterns(timestamps);
+        // Calculate intervals
+        const intervals = Utils.getTimeIntervals(sorted);
+        
+        if (intervals.length === 0) {
+            return {
+                meanInterval: 0,
+                medianInterval: 0,
+                stdDevInterval: 0,
+                jitter: 1,
+                periodicity: 0,
+                timingEntropy: 0
+            };
+        }
 
         return {
-            // Timing features
-            mean_interval: timingStats.mean / 1000,
-            median_interval: timingStats.median / 1000,
-            std_interval: timingStats.std / 1000,
-            min_interval: timingStats.min / 1000,
-            max_interval: timingStats.max / 1000,
-            cv_interval: cv,
-            jitter: cv,
-            periodicity: periodicity,
-            entropy: entropy,
-            regularity_score: cv > 0 ? 1 / (1 + cv) : 0,
-            
-            // Payload features
-            avg_bytes: byteStats.mean,
-            median_bytes: byteStats.median,
-            min_bytes: byteStats.min,
-            max_bytes: byteStats.max,
-            bytes_cv: bytesCV,
-            bytes_consistency: 1 - Math.min(bytesCV, 1),
-            total_bytes: byteSizes.reduce((a, b) => a + b, 0),
-            
-            // Network features
-            connection_count: connections.length,
-            duration_minutes: durationMs / 1000 / 60,
-            unique_dest_ips: destIPs.length,
-            unique_dest_ports: destPorts.length,
-            unique_src_ports: srcPorts.length,
-            connections_per_minute: connections.length / Math.max(durationMs / 1000 / 60, 1),
-            port_entropy: portEntropy,
-            
-            // Time patterns
-            time_diversity: timePatterns.diversity,
-            night_ratio: timePatterns.nightRatio
+            meanInterval: Utils.mean(intervals),
+            medianInterval: Utils.median(intervals),
+            stdDevInterval: Utils.stdDev(intervals),
+            minInterval: Math.min(...intervals),
+            maxInterval: Math.max(...intervals),
+            jitter: Utils.calculateJitter(intervals),
+            periodicity: Utils.calculatePeriodicity(intervals),
+            timingEntropy: Utils.calculateEntropy(
+                intervals.map(i => Math.round(i / 1000)) // Round to seconds
+            )
         };
     },
 
-    calculatePeriodicity(intervals, median) {
-        if (intervals.length === 0 || median === 0) return 0;
-        const tolerance = 0.15;
-        const closeToMedian = intervals.filter(i => Math.abs(i - median) / median < tolerance).length;
-        return closeToMedian / intervals.length;
+    analyzePayloads(connections) {
+        const sizes = connections
+            .map(c => c.bytes)
+            .filter(b => b !== undefined && b > 0);
+
+        if (sizes.length === 0) {
+            return {
+                meanPayload: 0,
+                medianPayload: 0,
+                stdDevPayload: 0,
+                payloadConsistency: 0,
+                payloadEntropy: 0
+            };
+        }
+
+        if (!Utils) return {};
+
+        const mean = Utils.mean(sizes);
+        const stdDev = Utils.stdDev(sizes);
+        
+        // Consistency = 1 - (stdDev / mean)
+        const consistency = mean > 0 ? Math.max(0, 1 - (stdDev / mean)) : 0;
+
+        return {
+            meanPayload: mean,
+            medianPayload: Utils.median(sizes),
+            stdDevPayload: stdDev,
+            minPayload: Math.min(...sizes),
+            maxPayload: Math.max(...sizes),
+            payloadConsistency: consistency,
+            payloadEntropy: Utils.calculateEntropy(
+                sizes.map(s => Math.round(s / 100) * 100) // Round to nearest 100
+            )
+        };
     },
 
-    calculateEntropy(intervals) {
-        if (intervals.length === 0) return 0;
-        
-        // Bucket intervals for entropy calculation
-        const bucketSize = 1000; // 1 second buckets
-        const buckets = {};
-        
-        intervals.forEach(interval => {
-            const bucket = Math.floor(interval / bucketSize);
-            buckets[bucket] = (buckets[bucket] || 0) + 1;
-        });
+    analyzeNetwork(connections) {
+        const destPorts = connections
+            .map(c => c.dest_port)
+            .filter(p => p !== undefined);
 
-        const total = intervals.length;
-        let entropy = 0;
+        const srcPorts = connections
+            .map(c => c.src_port)
+            .filter(p => p !== undefined);
 
-        Object.values(buckets).forEach(count => {
-            const p = count / total;
-            entropy -= p * Math.log2(p);
-        });
+        const uniqueDestPorts = new Set(destPorts).size;
+        const uniqueSrcPorts = new Set(srcPorts).size;
 
-        return entropy;
-    },
+        // Port diversity (0 = single port, 1 = many ports)
+        const portDiversity = destPorts.length > 0 ?
+            uniqueDestPorts / Math.sqrt(destPorts.length) : 0;
 
-    calculatePortEntropy(connections) {
-        const ports = connections.map(c => Utils.getDestPort(c)).filter(p => p > 0);
-        if (ports.length === 0) return 0;
-
+        // Get most common port
         const portCounts = {};
-        ports.forEach(port => {
-            portCounts[port] = (portCounts[port] || 0) + 1;
+        destPorts.forEach(p => {
+            portCounts[p] = (portCounts[p] || 0) + 1;
         });
-
-        const total = ports.length;
-        let entropy = 0;
-
-        Object.values(portCounts).forEach(count => {
-            const p = count / total;
-            entropy -= p * Math.log2(p);
-        });
-
-        return entropy;
-    },
-
-    analyzeTimePatterns(timestamps) {
-        const hours = timestamps.map(ts => new Date(ts).getHours());
-        const uniqueHours = new Set(hours).size;
         
-        // Count connections during night hours (10 PM - 6 AM)
-        const nightConnections = hours.filter(h => h >= 22 || h < 6).length;
-        
+        const mostCommonPort = Object.keys(portCounts).reduce((a, b) => 
+            portCounts[a] > portCounts[b] ? a : b, null
+        );
+
         return {
-            diversity: uniqueHours / 24,
-            nightRatio: nightConnections / timestamps.length
+            uniqueDestPorts,
+            uniqueSrcPorts,
+            portDiversity,
+            mostCommonPort: mostCommonPort ? parseInt(mostCommonPort) : null,
+            portConcentration: mostCommonPort ? 
+                portCounts[mostCommonPort] / destPorts.length : 0
         };
     },
 
-    identifyFramework(features, threatIntelMatches) {
-        const frameworks = [];
-        const interval = features.mean_interval;
-
-        // Threat intel based identification
-        if (threatIntelMatches && threatIntelMatches.length > 0) {
-            threatIntelMatches.forEach(match => {
-                const familyInfo = ThreatIntel.getMalwareFamilyInfo(match.malware);
-                if (familyInfo) {
-                    frameworks.push({
-                        name: familyInfo.framework,
-                        confidence: 'High',
-                        reason: `Matched known ${match.malware} IOC`,
-                        source: 'threat_intel'
-                    });
-                }
-            });
+    analyzeDuration(connections) {
+        if (connections.length === 0) {
+            return {
+                startTime: 0,
+                endTime: 0,
+                durationMs: 0,
+                durationHours: 0
+            };
         }
 
-        // Behavioral signatures
-        if (interval >= 55 && interval <= 65 && features.jitter < 0.10) {
-            frameworks.push({
-                name: 'Cobalt Strike',
-                confidence: 'High',
-                reason: '60-second beacon interval with low jitter',
-                source: 'behavioral'
-            });
-        }
+        const timestamps = connections.map(c => c.timestamp);
+        const startTime = Math.min(...timestamps);
+        const endTime = Math.max(...timestamps);
+        const durationMs = endTime - startTime;
 
-        if (interval >= 110 && interval <= 130 && features.jitter < 0.15) {
-            frameworks.push({
-                name: 'Metasploit/Meterpreter',
-                confidence: 'Medium',
-                reason: '120-second beacon pattern',
-                source: 'behavioral'
-            });
-        }
-
-        if (interval >= 4 && interval <= 12 && features.periodicity > 0.6) {
-            frameworks.push({
-                name: 'PowerShell Empire',
-                confidence: 'Medium',
-                reason: 'Short interval with moderate periodicity',
-                source: 'behavioral'
-            });
-        }
-
-        if (interval >= 55 && interval <= 65 && features.bytes_consistency > 0.85) {
-            frameworks.push({
-                name: 'Sliver',
-                confidence: 'Medium',
-                reason: '60s interval with consistent payloads',
-                source: 'behavioral'
-            });
-        }
-
-        // Advanced patterns
-        if (features.port_entropy < 0.5 && features.unique_dest_ports === 1) {
-            frameworks.push({
-                name: 'Generic C2',
-                confidence: 'Medium',
-                reason: 'Single port with consistent pattern',
-                source: 'behavioral'
-            });
-        }
-
-        // Deduplicate frameworks
-        const unique = [];
-        const seen = new Set();
-        
-        frameworks.forEach(fw => {
-            if (!seen.has(fw.name)) {
-                seen.add(fw.name);
-                unique.push(fw);
-            }
-        });
-
-        return unique.length > 0 ? unique : [{
-            name: 'Unknown/Custom',
-            confidence: 'N/A',
-            reason: 'Does not match known framework signatures',
-            source: 'behavioral'
-        }];
+        return {
+            startTime,
+            endTime,
+            durationMs,
+            durationHours: durationMs / (1000 * 60 * 60),
+            durationMinutes: durationMs / (1000 * 60)
+        };
     },
 
-    getMITREMapping(features) {
+    detectFrameworks(features, connections) {
+        const signatures = [];
+
+        // Cobalt Strike: ~60s intervals, low jitter
+        if (features.meanInterval >= 55000 && features.meanInterval <= 65000 &&
+            features.jitter < 0.10 && features.periodicity > 0.75) {
+            signatures.push({
+                framework: 'Cobalt Strike',
+                confidence: 'high',
+                reason: '60-second beacon with low jitter',
+                indicators: [
+                    `Interval: ${(features.meanInterval / 1000).toFixed(1)}s`,
+                    `Jitter: ${(features.jitter * 100).toFixed(1)}%`,
+                    `Periodicity: ${(features.periodicity * 100).toFixed(1)}%`
+                ]
+            });
+        }
+
+        // Metasploit: ~120s intervals
+        if (features.meanInterval >= 110000 && features.meanInterval <= 130000 &&
+            features.jitter < 0.20 && features.periodicity > 0.65) {
+            signatures.push({
+                framework: 'Metasploit/Meterpreter',
+                confidence: 'medium',
+                reason: '120-second beacon pattern',
+                indicators: [
+                    `Interval: ${(features.meanInterval / 1000).toFixed(1)}s`,
+                    `Periodicity: ${(features.periodicity * 100).toFixed(1)}%`
+                ]
+            });
+        }
+
+        // Empire: Short intervals, high periodicity
+        if (features.meanInterval < 30000 && features.meanInterval > 5000 &&
+            features.periodicity > 0.70) {
+            signatures.push({
+                framework: 'PowerShell Empire',
+                confidence: 'medium',
+                reason: 'Short periodic intervals',
+                indicators: [
+                    `Interval: ${(features.meanInterval / 1000).toFixed(1)}s`,
+                    `Periodicity: ${(features.periodicity * 100).toFixed(1)}%`
+                ]
+            });
+        }
+
+        // Sliver: Consistent payloads, moderate timing
+        if (features.payloadConsistency > 0.85 &&
+            features.periodicity > 0.60 &&
+            features.meanInterval > 30000) {
+            signatures.push({
+                framework: 'Sliver',
+                confidence: 'low',
+                reason: 'Consistent payload pattern',
+                indicators: [
+                    `Payload consistency: ${(features.payloadConsistency * 100).toFixed(1)}%`,
+                    `Periodicity: ${(features.periodicity * 100).toFixed(1)}%`
+                ]
+            });
+        }
+
+        // Generic C2 pattern
+        if (signatures.length === 0 &&
+            features.periodicity > 0.65 &&
+            features.jitter < 0.30 &&
+            features.uniqueDestinations === 1) {
+            signatures.push({
+                framework: 'Generic C2',
+                confidence: 'low',
+                reason: 'General beaconing pattern',
+                indicators: [
+                    'High periodicity',
+                    'Low jitter',
+                    'Single destination'
+                ]
+            });
+        }
+
+        return signatures;
+    },
+
+    mapMITRE(features) {
         const techniques = [];
 
-        if (features.periodicity > 0.7) {
+        // T1071 - Application Layer Protocol
+        if (features.mostCommonPort === 80 || features.mostCommonPort === 443 ||
+            features.mostCommonPort === 8080) {
             techniques.push({
                 id: 'T1071',
                 name: 'Application Layer Protocol',
-                tactic: 'Command and Control',
-                description: 'Regular beaconing pattern detected'
+                description: 'Using standard web ports for C2',
+                confidence: 'medium'
             });
         }
 
-        if (features.unique_dest_ips === 1 && features.duration_minutes > 60) {
+        // T1573 - Encrypted Channel
+        if (features.mostCommonPort === 443) {
             techniques.push({
                 id: 'T1573',
                 name: 'Encrypted Channel',
-                tactic: 'Command and Control',
-                description: 'Sustained communication with single endpoint'
+                description: 'Likely using HTTPS for encrypted C2',
+                confidence: 'medium'
             });
         }
 
-        if (features.bytes_consistency > 0.85) {
+        // T1001 - Data Obfuscation
+        if (features.payloadConsistency > 0.80) {
             techniques.push({
                 id: 'T1001',
                 name: 'Data Obfuscation',
-                tactic: 'Command and Control',
-                description: 'Consistent payload sizes may indicate obfuscation'
+                description: 'Consistent payload sizes suggest structured protocol',
+                confidence: 'low'
+            });
+        }
+
+        // T1095 - Non-Application Layer Protocol
+        if (features.mostCommonPort && 
+            features.mostCommonPort !== 80 && 
+            features.mostCommonPort !== 443 &&
+            features.mostCommonPort !== 8080) {
+            techniques.push({
+                id: 'T1095',
+                name: 'Non-Application Layer Protocol',
+                description: `Using non-standard port ${features.mostCommonPort}`,
+                confidence: 'low'
             });
         }
 
         return techniques;
+    },
+
+    // Helper to get human-readable summary
+    getSummary(features) {
+        return {
+            timing: {
+                avgInterval: Utils.formatDuration(features.meanInterval),
+                jitter: (features.jitter * 100).toFixed(1) + '%',
+                periodicity: (features.periodicity * 100).toFixed(1) + '%'
+            },
+            payload: {
+                avgSize: Utils.formatBytes(features.meanPayload),
+                consistency: (features.payloadConsistency * 100).toFixed(1) + '%'
+            },
+            network: {
+                destinations: features.uniqueDestinations,
+                sources: features.uniqueSources,
+                primaryPort: features.mostCommonPort || 'N/A'
+            },
+            duration: {
+                total: Utils.formatDuration(features.durationMs),
+                connections: features.connectionCount
+            }
+        };
     }
 };
+
+// Export for use in other modules
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = Analyzer;
+}
