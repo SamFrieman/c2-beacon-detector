@@ -74,33 +74,17 @@ const Detector = {
         return result;
     },
 
-    async checkThreatIntel(connections) {
-        const matches = [];
-        const checkedIPs = new Set();
-
-        // Extract unique IPs
-        if (typeof Utils !== 'undefined') {
-            const ips = Utils.extractUniqueIPs(connections);
-            
-            // Limit number of lookups
-            const ipsToCheck = ips.slice(0, ThreatIntel.config.maxIPs);
-
-            for (const ip of ipsToCheck) {
-                if (!checkedIPs.has(ip)) {
-                    checkedIPs.add(ip);
-                    const results = await ThreatIntel.lookupIP(ip);
-                    if (results && results.length > 0) {
-                        matches.push(...results);
-                    }
-                }
-            }
-        }
-
-        return {
-            checked: checkedIPs.size,
-            matches: matches
-        };
-    },
+   // Optimized checkThreatIntel in detector.js
+async checkThreatIntel(connections) {
+    const ips = Utils.extractUniqueIPs(connections).slice(0, ThreatIntel.config.maxIPs);
+    
+    // Launch all lookups simultaneously
+    const lookupPromises = ips.map(ip => ThreatIntel.lookupIP(ip));
+    const allResults = await Promise.all(lookupPromises);
+    
+    const matches = allResults.flat().filter(Boolean);
+    return { checked: ips.length, matches };
+},
 
     scoreThreatIntel(threatIntel) {
         if (!threatIntel.matches || threatIntel.matches.length === 0) {
