@@ -75,7 +75,7 @@ const Detector = {
     },
 
    // Optimized checkThreatIntel in detector.js
-async checkThreatIntel(connections) {
+    async checkThreatIntel(connections) {
     const ips = Utils.extractUniqueIPs(connections).slice(0, ThreatIntel.config.maxIPs);
     
     // Launch all lookups simultaneously
@@ -84,7 +84,8 @@ async checkThreatIntel(connections) {
     
     const matches = allResults.flat().filter(Boolean);
     return { checked: ips.length, matches };
-},
+    }
+
 
     scoreThreatIntel(threatIntel) {
         if (!threatIntel.matches || threatIntel.matches.length === 0) {
