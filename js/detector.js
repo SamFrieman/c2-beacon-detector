@@ -1,5 +1,5 @@
 // detector.js - Detection & Scoring Engine
-// Version 2.1.1
+// Version 2.1.2 - FIXED: Missing comma and parallel IP lookups
 
 const Detector = {
     async analyze(features, connections) {
@@ -74,18 +74,17 @@ const Detector = {
         return result;
     },
 
-   // Optimized checkThreatIntel in detector.js
+    // FIXED: Parallel IP lookups instead of sequential
     async checkThreatIntel(connections) {
-    const ips = Utils.extractUniqueIPs(connections).slice(0, ThreatIntel.config.maxIPs);
-    
-    // Launch all lookups simultaneously
-    const lookupPromises = ips.map(ip => ThreatIntel.lookupIP(ip));
-    const allResults = await Promise.all(lookupPromises);
-    
-    const matches = allResults.flat().filter(Boolean);
-    return { checked: ips.length, matches };
-    }
-
+        const ips = Utils.extractUniqueIPs(connections).slice(0, ThreatIntel.config.maxIPs);
+        
+        // Launch all lookups simultaneously
+        const lookupPromises = ips.map(ip => ThreatIntel.lookupIP(ip));
+        const allResults = await Promise.all(lookupPromises);
+        
+        const matches = allResults.flat().filter(Boolean);
+        return { checked: ips.length, matches };
+    },
 
     scoreThreatIntel(threatIntel) {
         if (!threatIntel.matches || threatIntel.matches.length === 0) {
