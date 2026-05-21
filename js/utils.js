@@ -146,7 +146,10 @@ const Utils = {
         
         // 169.254.0.0/16 (link-local)
         if (parts[0] === 169 && parts[1] === 254) return true;
-        
+
+        // 100.64.0.0/10 (RFC 6598 shared address space)
+        if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true;
+
         return false;
     },
 
@@ -236,15 +239,14 @@ const Utils = {
     },
 
     generateBenignSample() {
-        const startTime = Date.now() - (1 * 60 * 60 * 1000); // 1 hour ago
         const connections = [];
         const webServers = ['93.184.216.34', '151.101.1.140', '172.217.14.206'];
+        let timestamp = Date.now() - (1 * 60 * 60 * 1000); // start 1 hour ago
 
         for (let i = 0; i < 50; i++) {
-            // Random timing - not regular
-            const randomDelay = Math.floor(Math.random() * 30000) + 5000;
-            const timestamp = startTime + (i * randomDelay);
-            
+            // Accumulate random delays so timestamps stay in order
+            timestamp += Math.floor(Math.random() * 30000) + 5000;
+
             connections.push({
                 timestamp: timestamp,
                 bytes: Math.floor(Math.random() * 10000) + 500,
